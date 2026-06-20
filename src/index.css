@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600&family=Dancing+Script:wght@700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Montserrat", sans-serif;
+  --font-script: "Dancing Script", cursive;
+
+  --color-primary: #466486;
+  --color-secondary: #E9AA2F;
+  --color-background: #EDE9D8;
+  --color-muted: #95836C;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-primary font-sans;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold;
+  }
+}
+
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.id-card-gradient {
+  background: linear-gradient(135deg, #466486 0%, #2D4158 100%);
+}
+
+@media print {
+  body {
+    background: white !important;
+    background-color: white !important;
+    color: #1a1a1a !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    padding: 1cm !important;
+  }
+  
+  /* Esconder navegação, cabeçalho, botões e filtros */
+  .no-print,
+  button,
+  input,
+  select,
+  nav,
+  aside,
+  footer,
+  header .flex,
+  .flex.border-b,
+  [role="tablist"] {
+    display: none !important;
+  }
+
+  /* Ajustar containers para largura total */
+  .max-w-6xl,
+  .max-w-4xl,
+  main,
+  .space-y-6,
+  .space-y-8 {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Formatar cards e evitar quebra no meio do gráfico */
+  section,
+  .grid > div,
+  table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .card-shadow,
+  [class*="Card"],
+  .bg-white {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    background-color: white !important;
+    background: white !important;
+    border-radius: 8px !important;
+    margin-bottom: 1.5rem !important;
+    padding: 1.25rem !important;
+  }
+
+  /* Garantir que tabelas caibam perfeitamente na página */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 8px !important;
+  }
+
+  /* Cores escuras para texto de alta qualidade na impressão */
+  h1, h2, h3, h4, h5, h6, p, td, th, span {
+    color: #1E2A4A !important;
+  }
+}

@@ -1,0 +1,464 @@
+import React from 'react';
+import { useAuth } from '../AuthContext';
+import { Card } from '../components/Card';
+import { DigitalIDCard } from '../components/DigitalIDCard';
+import { Button } from '../components/Button';
+import {
+  User,
+  CreditCard,
+  ClipboardList,
+  LayoutDashboard,
+  LogOut,
+  ChevronRight,
+  Bell,
+  Calendar,
+  Info,
+  Plus,
+  UserPlus,
+  Shield,
+  Cake,
+  Edit2,
+  Trash2,
+  Loader2
+} from 'lucide-react';
+import { motion } from 'motion/react';
+import { Modal } from '../components/Modal';
+import { supabase } from '../lib/supabase';
+import { toCamel, toSnake } from '../lib/mapper';
+import { Announcement } from '../types';
+import { useToast } from '../components/Toast';
+
+export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
+  const { user, logout } = useAuth();
+  const { showToast, ToastContainer } = useToast();
+
+  const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [announcements, setAnnouncements] = React.useState<Announcement[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = React.useState<Announcement | null>(null);
+
+  const [formData, setFormData] = React.useState({
+    title: '',
+    dateInfo: '',
+    type: 'info' as 'info' | 'event' | 'alert',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: ''
+  });
+
+  const [blockingMessage, setBlockingMessage] = React.useState<string | null>(null);
+
+  const fetchAnnouncements = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('announcements')
+        .select('*')
+        .order('start_date', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar avisos:', error);
+        showToast('Erro ao carregar o mural de avisos.', 'error');
+      } else {
+        setAnnouncements(toCamel(data) || []);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchAnnouncements();
+  }, []);
+
+  if (!user) return null;
+
+  const isAdminOrSecretary = user.role === 'ADMIN' || user.role === 'SECRETARY';
+  const today = new Date().toISOString().split('T')[0];
+
+  const displayedAnnouncements = React.useMemo(() => {
+    if (isAdminOrSecretary) return announcements;
+    return announcements.filter(a => {
+      const start = a.startDate;
+      const end = a.endDate;
+      const afterStart = !start || start <= today;
+      const beforeEnd = !end || end >= today;
+      return afterStart && beforeEnd;
+    });
+  }, [announcements, isAdminOrSecretary, today]);
+
+  const handleNavigate = (pageId: string) => {
+    if (user.aceitou_politica === false && user.data_recusa && (pageId === 'idcard' || pageId === 'register')) {
+      setBlockingMessage("Não foi possível dar continuidade ao acesso à Carteira Digital e à Atualização de Cadastro, devido à não concordância com os termos de privacidade e consentimento de dados. Para mais informações, procure a secretaria da instituição.");
+      return;
+    }
+    onNavigate(pageId);
+  };
+
+  const handleSaveAnnouncement = async () => {
+    if (!formData.title || !formData.dateInfo || !formData.startDate) {
+      showToast('Por favor, preencha todos os campos obrigatórios.', 'error');
+      return;
+    }
+
+    try {
+      const payload = toSnake({
+        title: formData.title,
+        dateInfo: formData.dateInfo,
+        type: formData.type,
+        startDate: formData.startDate,
+        endDate: formData.endDate || null
+      });
+
+      if (editingAnnouncement) {
+        const { error } = await supabase
+          .from('announcements')
+          .update(payload)
+          .eq('id', editingAnnouncement.id);
+
+        if (error) throw error;
+        showToast('Aviso atualizado com sucesso!', 'success');
+      } else {
+        const { error } = await supabase
+          .from('announcements')
+          .insert([payload]);
+
+        if (error) throw error;
+        showToast('Aviso criado com sucesso!', 'success');
+      }
+
+      setIsModalOpen(false);
+      setEditingAnnouncement(null);
+      setFormData({
+        title: '',
+        dateInfo: '',
+        type: 'info',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: ''
+      });
+      fetchAnnouncements();
+    } catch (err: any) {
+      console.error('Erro ao salvar aviso:', err);
+      showToast(err.message || 'Erro ao salvar aviso.', 'error');
+    }
+  };
+
+  const handleEdit = (announcement: Announcement) => {
+    setEditingAnnouncement(announcement);
+    setFormData({
+      title: announcement.title,
+      dateInfo: announcement.dateInfo,
+      type: announcement.type,
+      startDate: announcement.startDate,
+      endDate: announcement.endDate || ''
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Tem certeza de que deseja excluir este aviso permanentemente?')) return;
+    try {
+      const { error } = await supabase
+        .from('announcements')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast('Aviso excluído com sucesso!', 'success');
+      fetchAnnouncements();
+    } catch (err: any) {
+      console.error('Erro ao excluir aviso:', err);
+      showToast(err.message || 'Erro ao excluir aviso.', 'error');
+    }
+  };
+
+  const icons = {
+    event: Calendar,
+    info: Info,
+    alert: Bell
+  };
+
+  const colors = {
+    event: 'text-secondary bg-amber-50',
+    info: 'text-primary bg-blue-50',
+    alert: 'text-rose-500 bg-rose-50'
+  };
+
+  const menuItems: any[] = [];
+
+  // Common items for all roles
+  if (user.role === 'MEMBER') {
+    menuItems.push({ id: 'register', label: 'Atualizar Cadastro', icon: ClipboardList, description: 'Mantenha seus dados em dia' });
+    menuItems.push({ id: 'idcard', label: 'Carteirinha Digital', icon: CreditCard, description: 'Acesse sua identificação' });
+  }
+
+  // Reception specific items
+  if (user.role === 'RECEPTION') {
+    menuItems.push({ id: 'worship-frequency', label: 'Registrar Frequência', icon: ClipboardList, description: 'Lançar presenças dos cultos' });
+    menuItems.push({ id: 'birthday-dashboard', label: 'Aniversariantes', icon: Cake, description: 'Ver e exportar aniversariantes' });
+  }
+
+  // Admin / Secretary items in required order
+  if (user.role === 'ADMIN' || user.role === 'SECRETARY') {
+    menuItems.push({ id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard, description: 'KPIs e Gestão de Membros' });
+    menuItems.push({ id: 'worship-frequency', label: 'Registrar Frequência', icon: ClipboardList, description: 'Lançar presenças dos cultos' });
+    menuItems.push({ id: 'members', label: 'Gestão de Membros', icon: UserPlus, description: 'Visualizar e editar cadastros' });
+    // Access management only for ADMIN, added later if applicable
+  }
+
+  // Access management (ADMIN only)
+  if (user.role === 'ADMIN') {
+    menuItems.push({ id: 'access', label: 'Gerenciamento de Acesso', icon: Shield, description: 'Gerir permissões de secretárias e membros' });
+  }
+
+  // Profile (Meu Login) should appear last
+  menuItems.push({ id: 'profile', label: 'Meu Login', icon: User, description: 'Alterar e-mail e senha' });
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 space-y-8">
+      <ToastContainer />
+
+      <header className="flex items-center justify-between bg-secondary px-5 py-3 rounded-lg shadow-sm">
+        <div>
+          <h1 className="text-xl font-display font-bold text-primary">Olá, {user.firstName}!</h1>
+          <p className="text-primary/80 text-sm font-semibold">Bem vindo (a) ao portal.</p>
+        </div>
+        <Button
+          variant="ghost"
+          onClick={logout}
+          className="text-primary hover:bg-primary/10 font-bold text-sm h-9"
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Sair
+        </Button>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+        <div className="space-y-4 pt-6">
+          <h3 className="text-xl font-display font-bold text-primary px-2 mb-4 border-b border-muted/10 pb-2">
+            Acesso Rápido
+          </h3>
+          {menuItems.map((item) => (
+            <motion.button
+              key={item.id}
+              whileHover={{ x: 5 }}
+              onClick={() => handleNavigate(item.id)}
+              className="w-full flex items-center gap-4 p-4 bg-white rounded-lg card-shadow hover:bg-primary/5 transition-colors text-left group"
+            >
+              <div className="p-3 bg-primary/10 rounded-full text-primary group-hover:bg-primary group-hover:text-white transition-colors">
+                <item.icon className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-primary">{item.label}</p>
+                <p className="text-xs text-muted">{item.description}</p>
+              </div>
+              <ChevronRight className="w-5 h-5 text-muted" />
+            </motion.button>
+          ))}
+        </div>
+
+        <Card title="Mural de Avisos" className="h-full flex flex-col gap-4">
+          {loading ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-2 flex-1">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+              <p className="text-xs text-muted">Carregando avisos...</p>
+            </div>
+          ) : displayedAnnouncements.length === 0 ? (
+            <div className="py-8 flex flex-col items-center justify-center flex-1">
+              <p className="text-center text-xs text-muted italic">Nenhum aviso ativo no momento.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 overflow-y-auto pr-1 flex-1 max-h-[360px] md:max-h-[420px]">
+              {displayedAnnouncements.map((notice) => {
+                const Icon = icons[notice.type] || Info;
+                const styleClass = colors[notice.type] || 'text-primary bg-blue-50';
+
+                // Calcular status do aviso para exibir selo aos administradores
+                const start = notice.startDate;
+                const end = notice.endDate;
+                const isFuture = start && start > today;
+                const isPast = end && end < today;
+                let statusLabel = '';
+                let statusColor = '';
+                if (isFuture) {
+                  statusLabel = 'Agendado';
+                  statusColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                } else if (isPast) {
+                  statusLabel = 'Expirado';
+                  statusColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                } else {
+                  statusLabel = 'Ativo';
+                  statusColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                }
+
+                return (
+                  <div
+                    key={notice.id}
+                    className="flex items-start justify-between gap-3 p-3 rounded-lg border border-muted/10 bg-background/25 hover:bg-background/40 transition-all shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-full shadow-inner ${styleClass}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-primary leading-tight">{notice.title}</p>
+                          {isAdminOrSecretary && (
+                            <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${statusColor}`}>
+                              {statusLabel}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted font-semibold mt-1">{notice.dateInfo}</p>
+                      </div>
+                    </div>
+                    {isAdminOrSecretary && (
+                      <div className="flex gap-1 flex-shrink-0 self-center">
+                        <button
+                          onClick={() => handleEdit(notice)}
+                          className="p-1 hover:bg-primary/10 rounded text-primary transition-colors"
+                          title="Editar Aviso"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(notice.id)}
+                          className="p-1 hover:bg-rose-50 rounded text-rose-500 transition-colors"
+                          title="Excluir Aviso"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex gap-2 mt-auto pt-2">
+            <Button onClick={fetchAnnouncements} variant="outline" size="sm" className="flex-1">
+              Atualizar Mural
+            </Button>
+            {isAdminOrSecretary && (
+              <Button onClick={() => {
+                setEditingAnnouncement(null);
+                setFormData({
+                  title: '',
+                  dateInfo: '',
+                  type: 'info',
+                  startDate: new Date().toISOString().split('T')[0],
+                  endDate: ''
+                });
+                setIsModalOpen(true);
+              }} size="sm" className="flex-1">
+                <Plus className="w-4 h-4 mr-1" /> Novo Aviso
+              </Button>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Modal CRUD de Avisos */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingAnnouncement(null);
+        }}
+        title={editingAnnouncement ? "Editar Aviso" : "Adicionar Novo Aviso"}
+        footer={
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsModalOpen(false);
+                setEditingAnnouncement(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveAnnouncement} disabled={!formData.title || !formData.dateInfo || !formData.startDate}>
+              {editingAnnouncement ? "Salvar Alterações" : "Salvar Aviso"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-primary mb-1 uppercase">Título do Aviso *</label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              placeholder="Ex: Culto de Jovens"
+              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-primary mb-1 uppercase">Descrição de Data/Horário *</label>
+            <input
+              type="text"
+              value={formData.dateInfo}
+              onChange={(e) => setFormData({ ...formData, dateInfo: e.target.value })}
+              placeholder="Ex: Domingo às 18:00"
+              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-primary mb-1 uppercase">Data de Início *</label>
+              <input
+                type="date"
+                value={formData.startDate}
+                onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-primary mb-1 uppercase">Data de Fim (Opcional)</label>
+              <input
+                type="date"
+                value={formData.endDate}
+                onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm bg-white"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-primary mb-1 uppercase">Tipo de Aviso *</label>
+            <select
+              value={formData.type}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
+              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none bg-white text-sm"
+            >
+              <option value="info">Informativo (Azul)</option>
+              <option value="event">Evento (Amarelo)</option>
+              <option value="alert">Alerta (Vermelho)</option>
+            </select>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal de Termo de Consentimento Bloqueado */}
+      <Modal
+        isOpen={!!blockingMessage}
+        onClose={() => setBlockingMessage(null)}
+        title="Acesso Restrito"
+        footer={
+          <Button onClick={() => setBlockingMessage(null)} className="w-full">Entendido</Button>
+        }
+      >
+        <div className="p-4 text-center space-y-4">
+          <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+            <Shield className="w-8 h-8" />
+          </div>
+          <p className="text-sm text-muted font-medium leading-relaxed">
+            {blockingMessage}
+          </p>
+        </div>
+      </Modal>
+    </div>
+  );
+};
