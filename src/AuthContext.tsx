@@ -250,24 +250,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const validUntilDate = new Date(now);
     validUntilDate.setMonth(validUntilDate.getMonth() + 18);
 
-    const snakeData = toSnake({
+    const updatedUser: Member = {
+      ...user,
       ...data,
       lastUpdated: now.toISOString(),
       validUntil: validUntilDate.toISOString().split('T')[0]
+    };
+
+    // 1) Atualização otimista imediata — UI responde instantaneamente
+    setUser(updatedUser);
+    localStorage.setItem('auth_user', JSON.stringify(updatedUser));
+
+    // 2) Persiste no Supabase em segundo plano (fire-and-forget)
+    //    sem bloquear a interface do usuário
+    const snakeData = toSnake({
+      ...data,
+      lastUpdated: updatedUser.lastUpdated,
+      validUntil: updatedUser.validUntil
     });
-    
-    const { error } = await supabase
-      .from('profiles')
-      .update(snakeData)
-      .eq('id', user.id);
 
-    if (error) {
-      console.error('Erro ao atualizar perfil:', error);
-      throw error;
-    }
-
-    setUser({ ...user, ...data });
+    const userId = user.id;
+    Promise.resolve(
+      supabase
+        .from('profiles')
+        .update(snakeData)
+        .eq('id', userId)
+    ).then(({ error }) => {
+      if (error) {
+        console.error('Erro ao sincronizar perfil no Supabase (background):', error);
+      }
+    }).catch((err) => {
+      console.error('Falha de rede ao sincronizar perfil (background):', err);
+    });
   };
+
 
   return (
     <AuthContext.Provider value={{ user, role: user?.role || null, login, register, logout, updateUser, isLoading }}>

@@ -56,13 +56,12 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
         .order('start_date', { ascending: false });
 
       if (error) {
-        console.error('Erro ao buscar avisos:', error);
-        showToast('Erro ao carregar o mural de avisos.', 'error');
-      } else {
+        console.warn('Aviso sobre busca de avisos no mural:', error.message || error);
+      } else if (data) {
         setAnnouncements(toCamel(data) || []);
       }
     } catch (err) {
-      console.error(err);
+      console.warn('Exceção ao buscar avisos no mural:', err);
     } finally {
       setLoading(false);
     }
@@ -76,6 +75,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
   const isAdminOrSecretary = user.role === 'ADMIN' || user.role === 'SECRETARY';
   const today = new Date().toISOString().split('T')[0];
+  const userFirstName = (user.firstName || '').trim().split(/\s+/)[0] || 'Membro';
 
   const displayedAnnouncements = React.useMemo(() => {
     if (isAdminOrSecretary) return announcements;
@@ -221,13 +221,13 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
       <header className="flex items-center justify-between bg-secondary px-5 py-3 rounded-lg shadow-sm">
         <div>
-          <h1 className="text-xl font-display font-bold text-primary">Olá, {user.firstName}!</h1>
-          <p className="text-primary/80 text-sm font-semibold">Bem vindo (a) ao portal.</p>
+          <h1 className="text-xl font-display font-bold text-primary">Olá, {userFirstName}!</h1>
+          <p className="text-primary/80 text-sm font-semibold">Seja bem-vindo(a) ao Portal de Membro</p>
         </div>
         <Button
           variant="ghost"
           onClick={logout}
-          className="text-primary hover:bg-primary/10 font-bold text-sm h-9"
+          className="text-primary hover:bg-primary/10 font-bold text-sm h-9 cursor-pointer"
         >
           <LogOut className="w-4 h-4 mr-2" />
           Sair
@@ -244,7 +244,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
               key={item.id}
               whileHover={{ x: 5 }}
               onClick={() => handleNavigate(item.id)}
-              className="w-full flex items-center gap-4 p-4 bg-white rounded-lg card-shadow hover:bg-primary/5 transition-colors text-left group"
+              className="w-full flex items-center gap-4 p-4 bg-white rounded-lg card-shadow hover:bg-primary/5 transition-colors text-left group cursor-pointer"
             >
               <div className="p-3 bg-primary/10 rounded-full text-primary group-hover:bg-primary group-hover:text-white transition-colors">
                 <item.icon className="w-6 h-6" />
@@ -317,14 +317,14 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
                       <div className="flex gap-1 flex-shrink-0 self-center">
                         <button
                           onClick={() => handleEdit(notice)}
-                          className="p-1 hover:bg-primary/10 rounded text-primary transition-colors"
+                          className="p-1 hover:bg-primary/10 rounded text-primary transition-colors cursor-pointer"
                           title="Editar Aviso"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDelete(notice.id)}
-                          className="p-1 hover:bg-rose-50 rounded text-rose-500 transition-colors"
+                          className="p-1 hover:bg-rose-50 rounded text-rose-500 transition-colors cursor-pointer"
                           title="Excluir Aviso"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -337,11 +337,8 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
             </div>
           )}
 
-          <div className="flex gap-2 mt-auto pt-2">
-            <Button onClick={fetchAnnouncements} variant="outline" size="sm" className="flex-1">
-              Atualizar Mural
-            </Button>
-            {isAdminOrSecretary && (
+          {isAdminOrSecretary && (
+            <div className="flex gap-2 mt-auto pt-2">
               <Button onClick={() => {
                 setEditingAnnouncement(null);
                 setFormData({
@@ -352,11 +349,11 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
                   endDate: ''
                 });
                 setIsModalOpen(true);
-              }} size="sm" className="flex-1">
+              }} size="sm" className="w-full">
                 <Plus className="w-4 h-4 mr-1" /> Novo Aviso
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </Card>
       </div>
 

@@ -36,7 +36,7 @@ export interface Child {
   name: string;
   cpf: string;
   birthDate: string;
-  congregates: 'Sim' | 'Não';
+  congregates?: 'Sim' | 'Não' | string;
   departments?: string[];
 }
 
@@ -166,3 +166,34 @@ export const POSITIONS = [
   'Evangelista',
   'Pastor'
 ];
+
+export const BRAZILIAN_STATES = [
+  'Acre - AC',
+  'Alagoas - AL',
+  'Amapá - AP',
+  'Amazonas - AM',
+  'Bahia - BA',
+  'Brasília - DF',
+  'Ceará - CE',
+  'Espírito Santo - ES',
+  'Goiás - GO',
+  'Maranhão - MA',
+  'Mato Grosso - MT',
+  'Mato Grosso do Sul - MS',
+  'Minas Gerais - MG',
+  'Pará - PA',
+  'Paraíba - PB',
+  'Paraná - PR',
+  'Pernambuco - PE',
+  'Piauí - PI',
+  'Rio de Janeiro - RJ',
+  'Rio Grande do Norte - RN',
+  'Rio Grande do Sul - RS',
+  'Rondônia - RO',
+  'Roraima - RR',
+  'Santa Catarina - SC',
+  'São Paulo - SP',
+  'Sergipe - SE',
+  'Tocantins - TO'
+] as const;
+
