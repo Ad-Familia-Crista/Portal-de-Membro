@@ -84,60 +84,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = React.useState<Member | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
+  // In-flight promise tracker to deduplicate concurrent fetch requests for the same profile
+  const fetchingProfileIdRef = React.useRef<string | null>(null);
+  const inFlightProfilePromiseRef = React.useRef<Promise<Member | null> | null>(null);
+
+  const fetchProfile = React.useCallback(async (userId: string): Promise<Member | null> => {
+    if (!userId) return null;
+
+    // Reuse in-flight request if one is already running for this user
+    if (fetchingProfileIdRef.current === userId && inFlightProfilePromiseRef.current) {
+      return inFlightProfilePromiseRef.current;
+    }
+
+    fetchingProfileIdRef.current = userId;
+    const promise = (async () => {
+      try {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+
+        if (error) {
+          console.error('Erro ao buscar perfil:', error);
+          return null;
+        }
+
+        return profile ? toCamel(profile) : null;
+      } catch (err) {
+        console.error('Exceção ao buscar perfil:', err);
+        return null;
+      } finally {
+        fetchingProfileIdRef.current = null;
+        inFlightProfilePromiseRef.current = null;
+      }
+    })();
+
+    inFlightProfilePromiseRef.current = promise;
+    return promise;
+  }, []);
+
   React.useEffect(() => {
     let isMounted = true;
 
-    const checkSession = async () => {
-      // Safety timeout: if Supabase hangs (e.g. lock issue in StrictMode), we stop loading after 6s
-      const timeout = setTimeout(() => {
-        if (isMounted) {
-          console.warn('⚠️  Supabase demorou demais. Encerrando estado de carregamento.');
-          setIsLoading(false);
-        }
-      }, 6000);
-
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) throw sessionError;
-
-        if (session) {
-          const { data: profile, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (profileError) {
-            console.error('Erro ao buscar perfil:', profileError);
-          } else if (profile && isMounted) {
-            setUser(toCamel(profile));
-          }
-        }
-      } catch (error) {
-        console.error('Erro na inicialização da sessão:', error);
-      } finally {
-        clearTimeout(timeout);
-        if (isMounted) setIsLoading(false);
-      }
-    };
-
-    checkSession();
-
+    // Single source of truth: onAuthStateChange handles initial session and all auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (session) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          if (isMounted) setUser(profile ? toCamel(profile) : null);
+        if (session?.user) {
+          const profile = await fetchProfile(session.user.id);
+          if (isMounted) {
+            if (profile) {
+              setUser(profile);
+            } else {
+              // Fallback minimal user profile if row is not created yet
+              setUser({
+                id: session.user.id,
+                email: session.user.email || '',
+                role: 'MEMBER',
+                status: 'ACTIVE',
+                firstName: session.user.user_metadata?.first_name || session.user.email?.split('@')[0] || 'Membro'
+              } as Member);
+            }
+          }
         } else {
           if (isMounted) setUser(null);
         }
       } catch (error) {
-        console.error('Erro ao processar mudança de estado de auth:', error);
+        console.error('Erro ao processar estado de autenticação:', error);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -147,7 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchProfile]);
 
 
   const login = async (email: string, pass: string) => {
@@ -160,32 +173,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (authError) throw authError;
     if (!authData.user) throw new Error('Falha no login. Tente novamente.');
 
-    // 2. Buscar o perfil diretamente (sem depender do onAuthStateChange)
-    try {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (profileError) {
-        console.error('Erro ao buscar perfil após login:', profileError);
-        // Perfil não encontrado na tabela - criar registro mínimo para o usuário entrar
-        const minimalUser: any = {
-          id: authData.user.id,
-          email: authData.user.email || email,
-          role: 'MEMBER',
-          status: 'ACTIVE',
-          firstName: authData.user.user_metadata?.first_name || email.split('@')[0],
-        };
-        setUser(minimalUser);
-      } else if (profile) {
-        setUser(toCamel(profile));
-      } else {
-        throw new Error('Perfil não encontrado. Entre em contato com a secretaria.');
-      }
-    } catch (err) {
-      console.error('Erro no fluxo de login:', err);
+    // 2. Buscar o perfil de forma deduplicada
+    const profile = await fetchProfile(authData.user.id);
+    if (profile) {
+      setUser(profile);
+    } else {
+      const minimalUser: any = {
+        id: authData.user.id,
+        email: authData.user.email || email,
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        firstName: authData.user.user_metadata?.first_name || email.split('@')[0],
+      };
+      setUser(minimalUser);
     }
   };
 

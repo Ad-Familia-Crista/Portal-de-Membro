@@ -17,7 +17,7 @@ export const maskCPF = (value: string) => {
 export const maskRG = (value: string) => {
   // Apenas letras e números (permite letra no dígito verificador ou formato alfanumérico)
   const clean = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 9);
-  
+
   if (clean.length <= 2) {
     return clean;
   }

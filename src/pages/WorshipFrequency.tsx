@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { WorshipFrequency, CULT_THEMES } from '../types';
 import { supabase } from '../lib/supabase';
 import { toCamel, toSnake } from '../lib/mapper';
+import { memoryCache } from '../lib/cache';
 import { 
   ClipboardList, 
   Calendar, 
@@ -21,9 +22,11 @@ import {
 export const WorshipFrequencyPage: React.FC = () => {
   const { user } = useAuth();
   
-  // State da Lista
-  const [records, setRecords] = React.useState<WorshipFrequency[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  // State da Lista com cache em memória
+  const [records, setRecords] = React.useState<WorshipFrequency[]>(() => {
+    return memoryCache.get<WorshipFrequency[]>('worship_frequency_list') || [];
+  });
+  const [loading, setLoading] = React.useState(() => !memoryCache.get('worship_frequency_list'));
   
   // State do Formulário
   const [isEditing, setIsEditing] = React.useState(false);
@@ -39,25 +42,36 @@ export const WorshipFrequencyPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  // Buscar registros
-  const fetchRecords = async () => {
+  // Buscar registros de forma otimizada
+  const fetchRecords = React.useCallback(async (force = false) => {
+    if (!force) {
+      const cached = memoryCache.get<WorshipFrequency[]>('worship_frequency_list');
+      if (cached) {
+        setRecords(cached);
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     const { data, error } = await supabase
       .from('worship_frequency')
-      .select('*')
+      .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
       .order('cult_date', { ascending: false });
 
     if (error) {
       console.error('Erro ao buscar frequências:', error);
     } else {
-      setRecords(toCamel(data) || []);
+      const camel = toCamel(data) || [];
+      setRecords(camel);
+      memoryCache.set('worship_frequency_list', camel, 3 * 60 * 1000);
     }
     setLoading(false);
-  };
+  }, []);
 
   React.useEffect(() => {
     fetchRecords();
-  }, []);
+  }, [fetchRecords]);
 
   // Calcular membros presentes reativamente (Fórmula: Total - (Visitantes + Crianças))
   const calculatedMembers = React.useMemo(() => {
@@ -116,6 +130,7 @@ export const WorshipFrequencyPage: React.FC = () => {
     if (error) {
       alert('Erro ao excluir: ' + error.message);
     } else {
+      memoryCache.invalidate('worship_frequency');
       setRecords(records.filter(r => r.id !== id));
       setSuccessMsg('Registro de frequência excluído com sucesso.');
       setTimeout(() => setSuccessMsg(null), 3000);
@@ -163,8 +178,6 @@ export const WorshipFrequencyPage: React.FC = () => {
       childrenAttendance: Number(childrenAttendance)
     });
 
-    console.log('Enviando dados da frequência:', recordPayload);
-
     try {
       if (isEditing && editingId) {
         // Atualizar
@@ -187,9 +200,12 @@ export const WorshipFrequencyPage: React.FC = () => {
         setSuccessMsg('Frequência registrada com sucesso!');
       }
 
+      // Invalidar caches compartilhados (Dashboard e Lista)
+      memoryCache.invalidate('worship_frequency');
+
       // Resetar formulário e recarregar
       handleCancel();
-      fetchRecords();
+      fetchRecords(true);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       console.error('Erro ao salvar frequência:', err);

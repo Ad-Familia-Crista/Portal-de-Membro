@@ -27,14 +27,19 @@ import { supabase } from '../lib/supabase';
 import { toCamel, toSnake } from '../lib/mapper';
 import { Announcement } from '../types';
 import { useToast } from '../components/Toast';
+import { MuralSkeleton } from '../components/Skeletons';
+import { memoryCache } from '../lib/cache';
 
 export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
   const { user, logout } = useAuth();
   const { showToast, ToastContainer } = useToast();
 
   const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [announcements, setAnnouncements] = React.useState<Announcement[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  const [announcements, setAnnouncements] = React.useState<Announcement[]>(() => {
+    return memoryCache.get<Announcement[]>('announcements') || [];
+  });
+  const [loading, setLoading] = React.useState(() => !memoryCache.get('announcements'));
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [editingAnnouncement, setEditingAnnouncement] = React.useState<Announcement | null>(null);
 
   const [formData, setFormData] = React.useState({
@@ -47,29 +52,45 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
   const [blockingMessage, setBlockingMessage] = React.useState<string | null>(null);
 
-  const fetchAnnouncements = async () => {
+  const fetchAnnouncements = React.useCallback(async (force = false) => {
+    if (!force) {
+      const cached = memoryCache.get<Announcement[]>('announcements');
+      if (cached) {
+        setAnnouncements(cached);
+        setLoading(false);
+        setLoadError(null);
+        return;
+      }
+    }
+
     setLoading(true);
+    setLoadError(null);
     try {
+      // Otimização: Selecionar apenas as colunas necessárias para o mural
       const { data, error } = await supabase
         .from('announcements')
-        .select('*')
+        .select('id, title, date_info, type, start_date, end_date, created_at')
         .order('start_date', { ascending: false });
 
       if (error) {
         console.warn('Aviso sobre busca de avisos no mural:', error.message || error);
+        setLoadError('Não foi possível carregar os avisos do mural no momento.');
       } else if (data) {
-        setAnnouncements(toCamel(data) || []);
+        const camelData = toCamel(data) || [];
+        setAnnouncements(camelData);
+        memoryCache.set('announcements', camelData, 3 * 60 * 1000); // 3 minutos de cache
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Exceção ao buscar avisos no mural:', err);
+      setLoadError('Erro de conexão ao carregar avisos.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   React.useEffect(() => {
     fetchAnnouncements();
-  }, []);
+  }, [fetchAnnouncements]);
 
   if (!user) return null;
 
@@ -137,7 +158,8 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
         startDate: new Date().toISOString().split('T')[0],
         endDate: ''
       });
-      fetchAnnouncements();
+      memoryCache.invalidate('announcements');
+      fetchAnnouncements(true);
     } catch (err: any) {
       console.error('Erro ao salvar aviso:', err);
       showToast(err.message || 'Erro ao salvar aviso.', 'error');
@@ -166,7 +188,8 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
       if (error) throw error;
       showToast('Aviso excluído com sucesso!', 'success');
-      fetchAnnouncements();
+      memoryCache.invalidate('announcements');
+      fetchAnnouncements(true);
     } catch (err: any) {
       console.error('Erro ao excluir aviso:', err);
       showToast(err.message || 'Erro ao excluir aviso.', 'error');
@@ -260,9 +283,15 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
         <Card title="Mural de Avisos" className="h-full flex flex-col gap-4">
           {loading ? (
-            <div className="py-8 flex flex-col items-center justify-center gap-2 flex-1">
-              <Loader2 className="w-8 h-8 text-primary animate-spin" />
-              <p className="text-xs text-muted">Carregando avisos...</p>
+            <div className="py-4 flex-1">
+              <MuralSkeleton />
+            </div>
+          ) : loadError ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-3 flex-1 text-center">
+              <p className="text-xs text-rose-500 font-medium">{loadError}</p>
+              <Button size="sm" variant="outline" onClick={() => fetchAnnouncements(true)}>
+                Tentar Novamente
+              </Button>
             </div>
           ) : displayedAnnouncements.length === 0 ? (
             <div className="py-8 flex flex-col items-center justify-center flex-1">

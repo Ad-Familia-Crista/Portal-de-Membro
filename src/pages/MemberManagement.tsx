@@ -23,6 +23,8 @@ import {
 import { Modal } from '../components/Modal';
 import { supabase } from '../lib/supabase';
 import { toSnake, toCamel } from '../lib/mapper';
+import { optimizeImage } from '../lib/imageOptimizer';
+import { MemberTableSkeleton } from '../components/Skeletons';
 
 interface MemberManagementProps {
   members: Member[];
@@ -411,21 +413,19 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'image/*';
-                    input.onchange = (e: any) => {
+                    input.onchange = async (e: any) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      if (file.size > 2 * 1024 * 1024) {
-                        alert('A imagem deve ter no máximo 2MB.');
-                        return;
-                      }
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
+                      try {
+                        const compressed = await optimizeImage(file, { maxWidth: 400, maxHeight: 400, quality: 0.82 });
                         setSelectedMember({
                           ...selectedMember,
-                          photoUrl: reader.result as string
+                          photoUrl: compressed
                         });
-                      };
-                      reader.readAsDataURL(file);
+                      } catch (err) {
+                        console.error('Erro ao otimizar imagem:', err);
+                        alert('Erro ao processar imagem.');
+                      }
                     };
                     input.click();
                   }}

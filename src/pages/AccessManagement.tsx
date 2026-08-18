@@ -33,8 +33,9 @@ export const AccessManagement: React.FC = () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('*')
-      .in('role', ['ADMIN', 'SECRETARY', 'RECEPTION']);
+      .select('id, email, first_name, last_name, role, status')
+      .in('role', ['ADMIN', 'SECRETARY', 'RECEPTION'])
+      .order('first_name', { ascending: true });
 
     if (error) {
       console.error('Erro ao buscar usuários de acesso:', error);
@@ -48,8 +49,9 @@ export const AccessManagement: React.FC = () => {
     setLoadingNormal(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('*')
-      .eq('role', 'MEMBER');
+      .select('id, email, first_name, last_name, role, status')
+      .eq('role', 'MEMBER')
+      .order('first_name', { ascending: true });
 
     if (error) {
       console.error('Erro ao buscar membros:', error);

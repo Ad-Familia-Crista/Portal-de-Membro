@@ -25,15 +25,18 @@ const schema = z.object({
   
   marriageDate: z.string().optional(),
   spouseName: z.string().optional(),
-  hasChildren: z.union([
-    z.string().min(1, 'Selecione se possui filhos'),
-    z.boolean().transform(v => v ? 'Sim' : 'Não'),
-  ]),
+  hasChildren: z.preprocess(
+    (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || '')),
+    z.string().min(1, 'Selecione se possui filhos')
+  ),
   children: z.array(z.object({
     name: z.string().optional(),
     cpf: z.string().optional(),
     birthDate: z.string().optional(),
-    congregates: z.string().optional(),
+    congregates: z.preprocess(
+      (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || 'Sim')),
+      z.string().optional()
+    ),
     departments: z.array(z.string()).optional()
   })).optional(),
 
@@ -53,22 +56,22 @@ const schema = z.object({
   education: z.string().optional(),
   profession: z.string().optional(),
 
-  isBaptized: z.union([
-    z.string().min(1, 'Selecione se é batizado'),
-    z.boolean().transform(v => v ? 'Sim' : 'Não'),
-  ]),
+  isBaptized: z.preprocess(
+    (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || '')),
+    z.string().min(1, 'Selecione se é batizado')
+  ),
   baptismChurch: z.string().optional(),
   baptismDate: z.string().optional(),
-  isHolySpiritBaptized: z.union([
-    z.string().min(1, 'Selecione se é batizado no E.S.'),
-    z.boolean().transform(v => v ? 'Sim' : 'Não'),
-  ]),
+  isHolySpiritBaptized: z.preprocess(
+    (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || '')),
+    z.string().min(1, 'Selecione se é batizado no E.S.')
+  ),
   entryDate: z.string().min(4, 'Ano de entrada é obrigatório'),
   previousChurch: z.string().optional(),
-  participatesInConvention: z.union([
-    z.string(),
-    z.boolean().transform(v => v ? 'Sim' : 'Não'),
-  ]).optional(),
+  participatesInConvention: z.preprocess(
+    (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || 'Não')),
+    z.string().optional()
+  ),
   conventionName: z.string().optional(),
 
   receivedAs: z.enum(['MEMBRO', 'CONGREGADO']).optional(),
@@ -205,7 +208,10 @@ export const RegistrationForm: React.FC = () => {
       isBaptized: user?.isBaptized ? 'Sim' : 'Não',
       isHolySpiritBaptized: user?.isHolySpiritBaptized ? 'Sim' : 'Não',
       participatesInConvention: user?.participatesInConvention ? 'Sim' : 'Não',
-      children: user?.children?.map(c => ({ ...c, congregates: c.congregates || 'Sim' })) || [],
+      children: user?.children?.map(c => ({ 
+        ...c, 
+        congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
+      })) || [],
       phones: user?.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
       departments: user?.departments || [],
       currentPosition: user?.currentPosition || 'Membro',
@@ -267,53 +273,57 @@ export const RegistrationForm: React.FC = () => {
       return verifiedCpfsCacheRef.current.get(clean) || null;
     }
 
-    // 3. Consultar banco de dados Supabase com timeout de 1.2s para nunca travar a UI
+    // 3. Consultar banco de dados Supabase via RPC PostgreSQL (execução 100% no banco sem trafegar dados)
     try {
-      const queryPromise = (async () => {
-        const formattedCpf = maskCPF(clean);
+      // Tentar via função RPC ultra-eficiente no PostgreSQL
+      const { data: existsRpc, error: rpcError } = await supabase.rpc('check_child_cpf_exists', {
+        check_cpf: clean,
+        exclude_user_id: user?.id || null
+      });
 
-        // Verificar se já existe como membro na tabela profiles
-        const { data: memberMatches, error: memberError } = await supabase
-          .from('profiles')
-          .select('id, cpf')
-          .or(`cpf.eq.${formattedCpf},cpf.eq.${clean}`)
-          .limit(1);
+      if (!rpcError && typeof existsRpc === 'boolean') {
+        if (existsRpc) {
+          verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
+          return 'CPF já cadastrado';
+        } else {
+          verifiedCpfsCacheRef.current.set(clean, null);
+          return null;
+        }
+      }
 
-        if (!memberError && memberMatches && memberMatches.length > 0) {
+      // Fallback seguro caso a migration ainda não tenha sido executada no painel Supabase
+      const formattedCpf = maskCPF(clean);
+
+      // Verificar se já existe como membro na tabela profiles
+      const { data: memberMatches, error: memberError } = await supabase
+        .from('profiles')
+        .select('id')
+        .or(`cpf.eq.${formattedCpf},cpf.eq.${clean}`)
+        .limit(1);
+
+      if (!memberError && memberMatches && memberMatches.length > 0) {
+        if (!user || memberMatches[0].id !== user.id) {
           verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
           return 'CPF já cadastrado';
         }
+      }
 
-        // Verificar se já existe na coluna jsonb children de outros membros
-        const { data: allProfiles, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id, children')
-          .not('children', 'is', null);
+      // Consulta direcionada por índice no JSONB sem baixar todos os perfis
+      const { data: childMatches, error: childError } = await supabase
+        .from('profiles')
+        .select('id')
+        .filter('children', 'cs', JSON.stringify([{ cpf: formattedCpf }]))
+        .limit(1);
 
-        if (!profilesError && allProfiles) {
-          for (const row of allProfiles) {
-            if (row.id === user?.id) continue; // Permite o próprio usuário manter o filho já salvo
-            const childrenList = Array.isArray(row.children) ? row.children : [];
-            for (const ch of childrenList) {
-              const chCpfClean = (ch?.cpf || '').replace(/\D/g, '');
-              if (chCpfClean === clean) {
-                verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
-                return 'CPF já cadastrado';
-              }
-            }
-          }
+      if (!childError && childMatches && childMatches.length > 0) {
+        if (!user || childMatches[0].id !== user.id) {
+          verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
+          return 'CPF já cadastrado';
         }
+      }
 
-        verifiedCpfsCacheRef.current.set(clean, null);
-        return null;
-      })();
-
-      const timeoutPromise = new Promise<string | null>((resolve) => {
-        setTimeout(() => resolve(null), 1200);
-      });
-
-      const result = await Promise.race([queryPromise, timeoutPromise]);
-      return result;
+      verifiedCpfsCacheRef.current.set(clean, null);
+      return null;
     } catch (err) {
       console.warn('Exceção ao verificar CPF no banco:', err);
       return null;

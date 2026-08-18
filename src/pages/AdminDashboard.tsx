@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { Member, WorshipFrequency, CULT_THEMES } from '../types';
 import { supabase } from '../lib/supabase';
 import { toCamel } from '../lib/mapper';
+import { memoryCache } from '../lib/cache';
 import { 
   Users, 
   UserCheck, 
@@ -31,12 +32,12 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  LineChart, 
+  Line, 
   Legend
 } from 'recharts';
 
@@ -56,38 +57,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
   const [monthFilter, setMonthFilter] = React.useState(-1);
   const [yearFilter, setYearFilter] = React.useState(new Date().getFullYear());
 
-  // State de Frequência de Cultos
-  const [frequencyRecords, setFrequencyRecords] = React.useState<WorshipFrequency[]>([]);
-  const [freqLoading, setFreqLoading] = React.useState(false);
+  // State de Frequência de Cultos com cache em memória
+  const [frequencyRecords, setFrequencyRecords] = React.useState<WorshipFrequency[]>(() => {
+    return memoryCache.get<WorshipFrequency[]>('worship_frequency_all') || [];
+  });
+  const [freqLoading, setFreqLoading] = React.useState(() => !memoryCache.get('worship_frequency_all'));
 
-  const fetchFrequencyRecords = async () => {
+  const fetchFrequencyRecords = React.useCallback(async (force = false) => {
+    if (!force) {
+      const cached = memoryCache.get<WorshipFrequency[]>('worship_frequency_all');
+      if (cached) {
+        setFrequencyRecords(cached);
+        setFreqLoading(false);
+        return;
+      }
+    }
+
     setFreqLoading(true);
     try {
       const { data, error } = await supabase
         .from('worship_frequency')
-        .select('*')
+        .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
         .order('cult_date', { ascending: true }); // Ordenação ascendente para linhas temporais perfeitas
 
       if (error) {
         console.error('Erro ao buscar frequências:', error);
       } else {
-        setFrequencyRecords(toCamel(data) || []);
+        const camel = toCamel(data) || [];
+        setFrequencyRecords(camel);
+        memoryCache.set('worship_frequency_all', camel, 3 * 60 * 1000);
       }
     } catch (err) {
       console.error('Erro de requisição de frequência:', err);
     } finally {
       setFreqLoading(false);
     }
-  };
+  }, []);
 
   React.useEffect(() => {
     fetchFrequencyRecords();
-  }, []);
+  }, [fetchFrequencyRecords]);
 
   // Sincronizar todos os dados das duas fontes
   const handleFullSync = () => {
+    memoryCache.invalidate('worship_frequency_all');
     onRefresh();
-    fetchFrequencyRecords();
+    fetchFrequencyRecords(true);
   };
 
   // ==========================================
