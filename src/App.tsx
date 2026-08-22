@@ -23,8 +23,20 @@ const PrivacyConsent = lazy(() => import('./components/PrivacyConsent').then(m =
 
 const AppContent: React.FC = () => {
   const { user, isLoading } = useAuth();
-  const [currentPage, setCurrentPage] = React.useState('home');
+  const [currentPage, setCurrentPageState] = React.useState<string>(() => {
+    try {
+      // Só restaura a página se o usuário não estiver sendo enviado para cá por logout/redirect
+      return localStorage.getItem('portal_current_page') || 'home';
+    } catch {
+      return 'home';
+    }
+  });
   const [showPrivacyModal, setShowPrivacyModal] = React.useState(false);
+
+  const setCurrentPage = React.useCallback((page: string) => {
+    setCurrentPageState(page);
+    try { localStorage.setItem('portal_current_page', page); } catch {}
+  }, []);
 
   // Cache global de membros para otimização de performance
   const [members, setMembers] = React.useState<Member[]>(() => {
@@ -98,6 +110,9 @@ const AppContent: React.FC = () => {
   }
 
   if (!user) {
+    // Limpar navegação salva ao deslogar, para que novo login inicie na Home
+    try { localStorage.removeItem('portal_current_page'); } catch {}
+    try { localStorage.removeItem('portal_registration_step'); } catch {}
     return <LoginPage />;
   }
 
@@ -108,7 +123,7 @@ const AppContent: React.FC = () => {
       case 'register':
         return (
           <Suspense fallback={<PageSkeleton />}>
-            <RegistrationForm />
+            <RegistrationForm onComplete={() => setCurrentPage('home')} />
           </Suspense>
         );
       case 'dashboard':

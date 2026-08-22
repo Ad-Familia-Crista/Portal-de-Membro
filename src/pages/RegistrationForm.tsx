@@ -6,10 +6,11 @@ import { useAuth } from '../AuthContext';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Card } from '../components/Card';
-import { DEPARTMENTS, CONSECRATIONS, POSITIONS, CHILD_DEPARTMENTS, BRAZILIAN_STATES } from '../types';
+import { DatePickerInput } from '../components/DatePickerInput';
+import { DEPARTMENTS, CONSECRATIONS, POSITIONS, CHILD_DEPARTMENTS, BRAZILIAN_STATES, ALL_COUNTRIES } from '../types';
 import { motion } from 'motion/react';
 import { maskCPF, maskRG, maskCEP, maskPhone, maskDate, maskMonthYear, maskYear, isValidCPF, cn } from '../utils';
-import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loader2, HelpCircle, Lock } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 import { ImageCropperModal } from '../components/ImageCropperModal';
@@ -50,7 +51,7 @@ const schema = z.object({
   state: z.string().min(2, 'UF é obrigatória'),
 
   cell: z.string().min(14, 'WhatsApp é obrigatório'),
-  phones: z.array(z.object({ number: z.string().min(14, 'Telefone inválido') })).optional(),
+  phones: z.array(z.object({ number: z.string().min(14, 'Telefone é obrigatório') })).optional(),
   email: z.string().email('E-mail inválido').optional().or(z.literal('')),
 
   education: z.string().optional(),
@@ -64,7 +65,7 @@ const schema = z.object({
   baptismDate: z.string().optional(),
   isHolySpiritBaptized: z.preprocess(
     (v) => (typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : (v || '')),
-    z.string().min(1, 'Selecione se é batizado no E.S.')
+    z.string().min(1, 'Selecione se é batizado no Espírito Santo')
   ),
   entryDate: z.string().min(4, 'Ano de entrada é obrigatório'),
   previousChurch: z.string().optional(),
@@ -102,6 +103,16 @@ const schema = z.object({
         code: z.ZodIssueCode.custom,
         message: "Nome do cônjuge é obrigatório",
         path: ["spouseName"],
+      });
+    }
+  }
+
+  if (data.isBaptized === 'Sim') {
+    if (!data.baptismDate || data.baptismDate.trim().length < 7) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Data de batismo nas águas é obrigatória",
+        path: ["baptismDate"],
       });
     }
   }
@@ -152,24 +163,48 @@ const formatInitialNaturalness = (val?: string) => {
   return match || val;
 };
 
-export const RegistrationForm: React.FC = () => {
+interface RegistrationFormProps {
+  onComplete?: () => void;
+}
+
+export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }) => {
   const { user, updateUser } = useAuth();
   const { showToast, ToastContainer } = useToast();
-  const [step, setStep] = React.useState(1);
+  // Restaurar etapa salva no localStorage
+  const [step, setStepState] = React.useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('portal_registration_step');
+      const parsed = saved ? parseInt(saved, 10) : 1;
+      return parsed >= 1 && parsed <= 8 ? parsed : 1;
+    } catch {
+      return 1;
+    }
+  });
+
+  const setStep = React.useCallback((s: number | ((prev: number) => number)) => {
+    setStepState(prev => {
+      const next = typeof s === 'function' ? s(prev) : s;
+      try { localStorage.setItem('portal_registration_step', String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   const totalSteps = 8;
   const [cepError, setCepError] = React.useState('');
+  const [cepLocked, setCepLocked] = React.useState(false); // true = campos CEP protegidos
   const [isSubmittingForm, setIsSubmittingForm] = React.useState(false);
   const [isValidatingStep, setIsValidatingStep] = React.useState(false);
   const [childCpfDbErrors, setChildCpfDbErrors] = React.useState<Record<number, string>>({});
   const [cropperOpen, setCropperOpen] = React.useState(false);
   const [tempImageSrc, setTempImageSrc] = React.useState<string | null>(null);
+  const [showConventionTooltip, setShowConventionTooltip] = React.useState(false);
   
   // Cache em memória para verificações de CPF instantâneas sem bater repetidamente no banco
   const verifiedCpfsCacheRef = React.useRef<Map<string, string | null>>(new Map());
 
   const isAdminOrSecretary = user?.role === 'ADMIN' || user?.role === 'SECRETARY';
 
-  const { register, handleSubmit, watch, setValue, control, trigger, getValues, formState: { errors } } = useForm({
+  const { register, handleSubmit, watch, setValue, control, trigger, getValues, formState: { errors }, reset } = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
       ...user,
@@ -178,7 +213,7 @@ export const RegistrationForm: React.FC = () => {
       rg: user?.rg || '',
       birthDate: user?.birthDate || '',
       naturalness: formatInitialNaturalness(user?.naturalness),
-      nationality: user?.nationality || 'Brasileiro(a)',
+      nationality: user?.nationality && user.nationality !== 'Brasileiro(a)' ? user.nationality : 'Brasil',
       maritalStatus: user?.maritalStatus || '',
       marriageDate: user?.marriageDate || '',
       spouseName: user?.spouseName || '',
@@ -220,6 +255,60 @@ export const RegistrationForm: React.FC = () => {
       photoUrl: user?.photoUrl || '',
     }
   });
+
+  // Sincronizar os valores do formulário imediatamente quando o perfil do usuário carregar ou atualizar
+  React.useEffect(() => {
+    if (user) {
+      reset({
+        ...user,
+        firstName: user.firstName || '',
+        cpf: user.cpf || '',
+        rg: user.rg || '',
+        birthDate: user.birthDate || '',
+        naturalness: formatInitialNaturalness(user.naturalness),
+        nationality: user.nationality && user.nationality !== 'Brasileiro(a)' ? user.nationality : 'Brasil',
+        maritalStatus: user.maritalStatus || '',
+        marriageDate: user.marriageDate || '',
+        spouseName: user.spouseName || '',
+        cep: user.cep || '',
+        address: user.address || '',
+        number: user.number || '',
+        complement: user.complement || '',
+        neighborhood: user.neighborhood || '',
+        city: user.city || '',
+        state: user.state || '',
+        cell: user.cell || '',
+        email: user.email || '',
+        education: user.education ? (user.education.startsWith('Ensino ') ? user.education : `Ensino ${user.education}`) : '',
+        profession: user.profession || '',
+        baptismChurch: user.baptismChurch || '',
+        baptismDate: user.baptismDate || '',
+        entryDate: user.entryDate ? String(user.entryDate) : '',
+        previousChurch: user.previousChurch || '',
+        conventionName: user.conventionName || '',
+        leaderDepartment: user.leaderDepartment || '',
+        consecratedTo: user.consecratedTo || '',
+        consecrationDate: user.consecrationDate || '',
+        receivedAs: (user.receivedAs === 'MEMBRO' || user.receivedAs === 'CONGREGADO')
+          ? user.receivedAs
+          : undefined,
+        hasChildren: user.hasChildren ? 'Sim' : 'Não',
+        isBaptized: user.isBaptized ? 'Sim' : 'Não',
+        isHolySpiritBaptized: user.isHolySpiritBaptized ? 'Sim' : 'Não',
+        participatesInConvention: user.participatesInConvention ? 'Sim' : 'Não',
+        children: user.children?.map(c => ({ 
+          ...c, 
+          congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
+        })) || [],
+        phones: user.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
+        departments: user.departments || [],
+        currentPosition: user.currentPosition || 'Membro',
+        positionStartDate: user.positionStartDate || new Date().toISOString().split('T')[0],
+        ministerialHistory: user.ministerialHistory || [],
+        photoUrl: user.photoUrl || '',
+      });
+    }
+  }, [user, reset]);
 
   const { fields: childFields, append: appendChild, remove: removeChild } = useFieldArray({
     control,
@@ -349,7 +438,13 @@ export const RegistrationForm: React.FC = () => {
     setValue('cep', value);
     setCepError('');
 
+    // Desbloqueia os campos para edição enquanto CEP não está completo
     const cleanCEP = value.replace(/\D/g, '');
+    if (cleanCEP.length < 8) {
+      setCepLocked(false);
+      return;
+    }
+
     if (cleanCEP.length === 8) {
       try {
         const response = await fetch(`https://viacep.com.br/ws/${cleanCEP}/json/`);
@@ -357,19 +452,23 @@ export const RegistrationForm: React.FC = () => {
         
         if (data.erro) {
           setCepError('CEP não encontrado');
+          setCepLocked(false);
         } else {
-          setValue('address', data.logradouro);
-          setValue('neighborhood', data.bairro);
-          setValue('city', data.localidade);
-          setValue('state', data.uf);
+          setValue('address', data.logradouro || '');
+          setValue('neighborhood', data.bairro || '');
+          setValue('city', data.localidade || '');
+          setValue('state', data.uf || '');
+          // Protege os campos preenchidos automaticamente pelo CEP
+          setCepLocked(true);
         }
       } catch (error) {
         setCepError('Erro ao buscar CEP');
+        setCepLocked(false);
       }
     }
   };
 
-  const onSubmit = (data: any) => {
+  const onSubmit = async (data: any) => {
     setIsSubmittingForm(true);
     try {
       const formattedData = {
@@ -379,13 +478,17 @@ export const RegistrationForm: React.FC = () => {
         isHolySpiritBaptized: data.isHolySpiritBaptized === 'Sim',
         participatesInConvention: data.participatesInConvention === 'Sim',
         children: data.children?.map((c: any) => ({ ...c, congregates: c.congregates || 'Sim' })) || [],
-        phones: data.phones?.map((p: any) => p.number) || [],
+        phones: data.phones?.map((p: any) => p.number).filter(Boolean) || [],
       };
-      // updateUser agora salva em segundo plano (fire-and-forget)
-      // — não precisa de await para dar feedback ao usuário
-      updateUser(formattedData);
+      await updateUser(formattedData);
       showToast('Cadastro atualizado com sucesso!', 'success');
-      setStep(1);
+      // Limpar etapa salva e retornar para o início do Portal
+      try { localStorage.removeItem('portal_registration_step'); } catch {}
+      if (onComplete) {
+        onComplete();
+      } else {
+        setStep(1);
+      }
     } catch (error: any) {
       console.error('Erro ao salvar cadastro:', error);
       showToast(error.message || 'Erro ao salvar. Verifique sua conexão.', 'error');
@@ -453,54 +556,14 @@ export const RegistrationForm: React.FC = () => {
 
       // Validação estrita e amigável da Etapa 2
       if (step === 2) {
-        // 1. Estado Civil
-        if (!maritalStatusVal) {
-          showToast('Por favor, selecione o Estado Civil.', 'error');
+        const isStepValid = await trigger(['maritalStatus', 'marriageDate', 'spouseName', 'hasChildren', 'children']);
+        
+        if (!isStepValid) {
+          showToast('Por favor, preencha todos os campos obrigatórios da etapa familiar.', 'error');
           return;
         }
 
-        if (maritalStatusVal === 'Casado') {
-          const mDate = getValues('marriageDate');
-          const sName = getValues('spouseName');
-          if (!mDate || mDate.length < 10) {
-            showToast('Por favor, informe a Data de Casamento (DD/MM/AAAA).', 'error');
-            return;
-          }
-          if (!sName || !sName.trim()) {
-            showToast('Por favor, informe o Nome do Cônjuge.', 'error');
-            return;
-          }
-        }
-
-        // 2. Pergunta de Filhos
-        if (!hasChildrenVal) {
-          showToast('Por favor, selecione se possui filhos ou menores sob sua responsabilidade.', 'error');
-          return;
-        }
-
-        if (hasChildrenVal === 'Sim') {
-          if (!currentChildren || currentChildren.length === 0) {
-            showToast('Você marcou "Sim". Clique em "Adicionar Filho" para cadastrar pelo menos um dependente ou marque "Não".', 'error');
-            return;
-          }
-
-          for (let i = 0; i < currentChildren.length; i++) {
-            const ch = currentChildren[i];
-            if (!ch?.name || !ch.name.trim()) {
-              showToast(`Por favor, informe o Nome do ${i + 1}º filho(a).`, 'error');
-              return;
-            }
-            const cleanCpf = (ch?.cpf || '').replace(/\D/g, '');
-            if (cleanCpf.length !== 11) {
-              showToast(`Por favor, informe o CPF completo (11 dígitos) do ${i + 1}º filho(a).`, 'error');
-              return;
-            }
-            if (!ch?.birthDate || ch.birthDate.length < 10) {
-              showToast(`Por favor, informe a Data de Nascimento (DD/MM/AAAA) do ${i + 1}º filho(a).`, 'error');
-              return;
-            }
-          }
-
+        if (hasChildrenVal === 'Sim' && currentChildren.length > 0) {
           // Validar duplicidade de CPF no banco em paralelo
           const checkPromises = currentChildren.map((ch, i) => validateChildCpfInDatabase(ch.cpf, i));
           const checkResults = await Promise.all(checkPromises);
@@ -512,7 +575,7 @@ export const RegistrationForm: React.FC = () => {
             if (dbError) {
               newDbErrors[i] = dbError;
               dbErrorFound = true;
-              showToast(`${dbError} para o ${i + 1}º filho(a).`, 'error');
+              showToast(`${dbError} para o ${i + 1}º dependente.`, 'error');
             }
           }
           setChildCpfDbErrors(newDbErrors);
@@ -619,16 +682,15 @@ export const RegistrationForm: React.FC = () => {
                   name="birthDate"
                   control={control}
                   render={({ field }) => (
-                    <Input 
-                      label="Data de Nascimento *" 
-                      {...field} 
-                      onChange={(e) => field.onChange(maskDate(e.target.value))}
-                      error={errors.birthDate?.message} 
-                      placeholder="DD/MM/AAAA"
+                    <DatePickerInput
+                      label="Data de Nascimento *"
+                      value={field.value}
+                      onChange={field.onChange}
+                      error={errors.birthDate?.message}
                     />
                   )}
                 />
-                
+
                 {/* Campo Naturalidade: Dropdown com todos os estados brasileiros e DF */}
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-primary">Naturalidade *</label>
@@ -647,7 +709,23 @@ export const RegistrationForm: React.FC = () => {
                   {errors.naturalness && <p className="text-xs text-red-500 font-medium">{errors.naturalness.message}</p>}
                 </div>
 
-                <Input label="Nacionalidade * (Ex: Brasileiro(a))" {...register('nationality')} error={errors.nationality?.message} />
+                {/* Nacionalidade: dropdown com todos os países do mundo */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-primary">Nacionalidade *</label>
+                  <select
+                    {...register('nationality')}
+                    className={cn(
+                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer",
+                      errors.nationality ? "border-red-500 focus:ring-red-500/50" : "border-muted/30"
+                    )}
+                  >
+                    <option value="">Selecione o país...</option>
+                    {ALL_COUNTRIES.map((country) => (
+                      <option key={country} value={country}>{country}</option>
+                    ))}
+                  </select>
+                  {errors.nationality && <p className="text-xs text-red-500 font-medium">{errors.nationality.message}</p>}
+                </div>
               </div>
             </Card>
           </motion.div>
@@ -681,27 +759,26 @@ export const RegistrationForm: React.FC = () => {
                       name="marriageDate"
                       control={control}
                       render={({ field }) => (
-                        <Input 
-                          label="Data de Casamento *" 
-                          {...field} 
-                          onChange={(e) => field.onChange(maskDate(e.target.value))}
-                          placeholder="DD/MM/AAAA"
+                        <DatePickerInput
+                          label="Data de Casamento *"
+                          value={field.value}
+                          onChange={field.onChange}
                           error={errors.marriageDate?.message}
                         />
                       )}
                     />
-                    <Input 
-                      label="Nome do Cônjuge *" 
-                      {...register('spouseName')} 
+                    <Input
+                      label="Nome completo do cônjuge *"
+                      {...register('spouseName')}
                       error={errors.spouseName?.message}
                     />
                   </div>
                 )}
 
-                {/* Pergunta de Filhos com texto completo solicitado */}
+                {/* Pergunta de Filhos */}
                 <div className="space-y-2 pt-2 border-t border-muted/10">
                   <label className="text-sm font-semibold text-primary block leading-relaxed">
-                    Possui filho(s) ou alguma(s) criança(s)/ adolescente menor de 13 anos que congrega com você? *
+                    Possui filho(s), criança(s) ou adolescente(s) menor(es) de 13 anos que congregam com você? *
                   </label>
                   <div className={cn("flex gap-6 p-2 rounded-md", errors.hasChildren && "border border-red-500 bg-red-50/20")}>
                     <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -729,7 +806,7 @@ export const RegistrationForm: React.FC = () => {
                 {hasChildren === 'Sim' && (
                   <div className="space-y-4 pt-4 border-t border-muted/10 animate-in fade-in">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-bold text-primary">Cadastro de Filhos / Dependentes</h4>
+                      <h4 className="text-sm font-bold text-primary">Cadastro de filho(s) ou dependente(s)</h4>
                       <Button 
                         type="button" 
                         size="sm" 
@@ -769,19 +846,19 @@ export const RegistrationForm: React.FC = () => {
                           </button>
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <Input 
-                              label="Nome do Filho(a) *" 
-                              {...register(`children.${index}.name`)} 
-                              error={errors.children?.[index]?.name?.message} 
+                            <Input
+                              label="Nome completo do filho(a) *"
+                              {...register(`children.${index}.name`)}
+                              error={errors.children?.[index]?.name?.message}
                             />
-                            
+
                             <Controller
                               name={`children.${index}.cpf`}
                               control={control}
                               render={({ field: cpfField }) => (
-                                <Input 
-                                  label="CPF *" 
-                                  {...cpfField} 
+                                <Input
+                                  label="CPF *"
+                                  {...cpfField}
                                   onChange={(e) => {
                                     cpfField.onChange(maskCPF(e.target.value));
                                     if (childCpfDbErrors[index]) {
@@ -806,11 +883,10 @@ export const RegistrationForm: React.FC = () => {
                               name={`children.${index}.birthDate`}
                               control={control}
                               render={({ field: birthField }) => (
-                                <Input 
-                                  label="Data de Nascimento *" 
-                                  {...birthField} 
-                                  onChange={(e) => birthField.onChange(maskDate(e.target.value))}
-                                  placeholder="DD/MM/AAAA"
+                                <DatePickerInput
+                                  label="Data de Nascimento *"
+                                  value={birthField.value}
+                                  onChange={birthField.onChange}
                                   error={errors.children?.[index]?.birthDate?.message}
                                 />
                               )}
@@ -846,7 +922,7 @@ export const RegistrationForm: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-primary">CEP *</label>
-                  <input 
+                  <input
                     {...register('cep')}
                     onChange={handleCEPChange}
                     placeholder="00000-000"
@@ -854,12 +930,96 @@ export const RegistrationForm: React.FC = () => {
                   />
                   {(errors.cep || cepError) && <p className="text-xs text-red-500">{errors.cep?.message || cepError}</p>}
                 </div>
-                <Input label="Endereço *" {...register('address')} error={errors.address?.message} />
+
+                {/* Endereço - protegido quando preenchido pelo CEP */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                    Endereço *
+                    {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
+                  </label>
+                  <input
+                    {...register('address')}
+                    readOnly={cepLocked}
+                    className={cn(
+                      "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
+                      cepLocked
+                        ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
+                        : "border-muted/30 bg-white focus:ring-primary/50",
+                      errors.address && "border-red-500"
+                    )}
+                  />
+                  {errors.address && <p className="text-xs text-red-500">{errors.address.message}</p>}
+                </div>
+
                 <Input label="Número *" {...register('number')} error={errors.number?.message} />
                 <Input label="Complemento" {...register('complement')} />
-                <Input label="Bairro *" {...register('neighborhood')} error={errors.neighborhood?.message} />
-                <Input label="Cidade *" {...register('city')} error={errors.city?.message} />
-                <Input label="UF *" {...register('state')} error={errors.state?.message} />
+
+                {/* Bairro - protegido quando preenchido pelo CEP */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                    Bairro *
+                    {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
+                  </label>
+                  <input
+                    {...register('neighborhood')}
+                    readOnly={cepLocked}
+                    className={cn(
+                      "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
+                      cepLocked
+                        ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
+                        : "border-muted/30 bg-white focus:ring-primary/50",
+                      errors.neighborhood && "border-red-500"
+                    )}
+                  />
+                  {errors.neighborhood && <p className="text-xs text-red-500">{errors.neighborhood.message}</p>}
+                </div>
+
+                {/* Cidade - protegido quando preenchido pelo CEP */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                    Cidade *
+                    {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
+                  </label>
+                  <input
+                    {...register('city')}
+                    readOnly={cepLocked}
+                    className={cn(
+                      "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
+                      cepLocked
+                        ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
+                        : "border-muted/30 bg-white focus:ring-primary/50",
+                      errors.city && "border-red-500"
+                    )}
+                  />
+                  {errors.city && <p className="text-xs text-red-500">{errors.city.message}</p>}
+                </div>
+
+                {/* UF - protegido quando preenchido pelo CEP */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                    UF *
+                    {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
+                  </label>
+                  <input
+                    {...register('state')}
+                    readOnly={cepLocked}
+                    className={cn(
+                      "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
+                      cepLocked
+                        ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
+                        : "border-muted/30 bg-white focus:ring-primary/50",
+                      errors.state && "border-red-500"
+                    )}
+                  />
+                  {errors.state && <p className="text-xs text-red-500">{errors.state.message}</p>}
+                </div>
+
+                {cepLocked && (
+                  <p className="col-span-full text-xs text-muted/70 flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    Os campos marcados foram preenchidos automaticamente pelo CEP. Para alterá-los, modifique o CEP acima.
+                  </p>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -902,10 +1062,11 @@ export const RegistrationForm: React.FC = () => {
                           control={control}
                           render={({ field }) => (
                             <Input 
-                              label={`Telefone ${index + 2}`} 
+                              label={`Telefone ${index + 2} *`} 
                               {...field} 
                               onChange={(e) => field.onChange(maskPhone(e.target.value))}
                               placeholder="(00) 00000-0000"
+                              error={errors.phones?.[index]?.number?.message}
                             />
                           )}
                         />
@@ -951,8 +1112,10 @@ export const RegistrationForm: React.FC = () => {
             <Card title="6 - Informações Espirituais">
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                  {/* 1. Batizado nas Águas */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary">Batizado nas Águas? *</label>
+                    <label className="text-sm font-semibold text-primary">Você é batizado(a) nas Águas? *</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input type="radio" value="Sim" {...register('isBaptized')} /> Sim
@@ -962,26 +1125,49 @@ export const RegistrationForm: React.FC = () => {
                       </label>
                     </div>
                   </div>
+
+                  {/* 2. Detalhes do batismo nas águas */}
                   {isBaptized === 'Sim' && (
                     <>
-                      <Input label="Igreja que foi batizado(a) na água" {...register('baptismChurch')} />
-                      
+                      <Input label="Em qual igreja foi batizado(a) nas águas?" {...register('baptismChurch')} />
+
                       <Controller
                         name="baptismDate"
                         control={control}
                         render={({ field }) => (
-                          <Input 
-                            label="Data de batismo nas águas (mês/ano)*" 
-                            {...field} 
-                            onChange={(e) => field.onChange(maskMonthYear(e.target.value))}
-                            placeholder="MM/AAAA"
+                          <DatePickerInput
+                            label="Qual a data de batismo nas águas (mês/ano)? *"
+                            mode="month"
+                            value={field.value}
+                            onChange={field.onChange}
+                            error={errors.baptismDate?.message}
                           />
                         )}
                       />
                     </>
                   )}
+
+                  {/* 3. Igreja antes da ADFC */}
+                  <Input label="Qual igreja frequentava antes da ADFC?" {...register('previousChurch')} />
+
+                  {/* 4. Ano que entrou na ADFC */}
+                  <Controller
+                    name="entryDate"
+                    control={control}
+                    render={({ field }) => (
+                      <Input
+                        label="Em que ano entrou na ADFC? *"
+                        {...field}
+                        onChange={(e) => field.onChange(maskYear(e.target.value))}
+                        placeholder="AAAA"
+                        error={errors.entryDate?.message}
+                      />
+                    )}
+                  />
+
+                  {/* 5. Batizado no Espírito Santo */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary">Batizado no Espírito Santo? *</label>
+                    <label className="text-sm font-semibold text-primary">Você é batizado(a) com Espírito Santo? *</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input type="radio" value="Sim" {...register('isHolySpiritBaptized')} /> Sim
@@ -991,22 +1177,31 @@ export const RegistrationForm: React.FC = () => {
                       </label>
                     </div>
                   </div>
-                  <Controller
-                    name="entryDate"
-                    control={control}
-                    render={({ field }) => (
-                      <Input 
-                        label="Ano que entrou na ADFC *" 
-                        {...field} 
-                        onChange={(e) => field.onChange(maskYear(e.target.value))}
-                        placeholder="AAAA"
-                        error={errors.entryDate?.message}
-                      />
-                    )}
-                  />
-                  <Input label="Igreja antes da ADFC" {...register('previousChurch')} />
+
+                  {/* 6. Convenção com tooltip explicativo */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary">Participa de alguma convenção?</label>
+                    <label className="text-sm font-semibold text-primary flex items-center gap-2">
+                      Participa de alguma convenção?
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowConventionTooltip(v => !v)}
+                          onMouseEnter={() => setShowConventionTooltip(true)}
+                          onMouseLeave={() => setShowConventionTooltip(false)}
+                          aria-label="O que é convenção?"
+                          className="text-primary/60 hover:text-primary transition-colors focus:outline-none cursor-pointer"
+                        >
+                          <HelpCircle className="w-4 h-4" />
+                        </button>
+                        {showConventionTooltip && (
+                          <div className="absolute left-6 -top-1 z-50 w-64 bg-primary text-white text-xs rounded-lg p-3 shadow-xl leading-relaxed">
+                            <p className="font-semibold mb-1">O que é uma convenção?</p>
+                            <p>Convenção é a associação que reúne várias igrejas locais e pastores de uma mesma denominação ou fé.</p>
+                            <div className="absolute left-[-6px] top-3 w-0 h-0 border-t-[6px] border-t-transparent border-r-[6px] border-r-primary border-b-[6px] border-b-transparent" />
+                          </div>
+                        )}
+                      </div>
+                    </label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input type="radio" value="Sim" {...register('participatesInConvention')} /> Sim
@@ -1016,7 +1211,7 @@ export const RegistrationForm: React.FC = () => {
                       </label>
                     </div>
                   </div>
-                  {participatesInConvention === 'Sim' && <Input label="Qual?" {...register('conventionName')} />}
+                  {participatesInConvention === 'Sim' && <Input label="Qual convenção?" {...register('conventionName')} />}
                 </div>
               </div>
             </Card>

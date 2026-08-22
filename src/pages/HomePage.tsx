@@ -244,7 +244,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
       <header className="flex items-center justify-between bg-secondary px-5 py-3 rounded-lg shadow-sm">
         <div>
-          <h1 className="text-xl font-display font-bold text-primary">Olá, {userFirstName}!</h1>
+          <h1 className="text-xl font-display font-bold text-primary">Olá, {userFirstName.toUpperCase()}! 😃</h1>
           <p className="text-primary/80 text-sm font-semibold">Seja bem-vindo(a) ao Portal de Membro</p>
         </div>
         <Button

@@ -81,8 +81,15 @@ const MOCK_MEMBER: Member = {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = React.useState<Member | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [user, setUser] = React.useState<Member | null>(() => {
+    try {
+      const cached = localStorage.getItem('auth_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoading, setIsLoading] = React.useState(() => !localStorage.getItem('auth_user'));
 
   // In-flight promise tracker to deduplicate concurrent fetch requests for the same profile
   const fetchingProfileIdRef = React.useRef<string | null>(null);
@@ -107,12 +114,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (error) {
           console.error('Erro ao buscar perfil:', error);
+          const cached = localStorage.getItem('auth_user');
+          if (cached) {
+            try { return JSON.parse(cached); } catch {}
+          }
           return null;
         }
 
-        return profile ? toCamel(profile) : null;
+        const camel = profile ? toCamel(profile) : null;
+        if (camel) {
+          try {
+            localStorage.setItem('auth_user', JSON.stringify(camel));
+          } catch {}
+        }
+        return camel;
       } catch (err) {
         console.error('Exceção ao buscar perfil:', err);
+        const cached = localStorage.getItem('auth_user');
+        if (cached) {
+          try { return JSON.parse(cached); } catch {}
+        }
         return null;
       } finally {
         fetchingProfileIdRef.current = null;
@@ -137,13 +158,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setUser(profile);
             } else {
               // Fallback minimal user profile if row is not created yet
-              setUser({
+              setUser(prev => prev || ({
                 id: session.user.id,
                 email: session.user.email || '',
                 role: 'MEMBER',
                 status: 'ACTIVE',
                 firstName: session.user.user_metadata?.first_name || session.user.email?.split('@')[0] || 'Membro'
-              } as Member);
+              } as Member));
             }
           }
         } else {
@@ -259,29 +280,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 1) Atualização otimista imediata — UI responde instantaneamente
     setUser(updatedUser);
-    localStorage.setItem('auth_user', JSON.stringify(updatedUser));
+    try {
+      localStorage.setItem('auth_user', JSON.stringify(updatedUser));
+    } catch {}
 
-    // 2) Persiste no Supabase em segundo plano (fire-and-forget)
-    //    sem bloquear a interface do usuário
+    // 2) Persiste no Supabase
     const snakeData = toSnake({
       ...data,
       lastUpdated: updatedUser.lastUpdated,
       validUntil: updatedUser.validUntil
     });
 
-    const userId = user.id;
-    Promise.resolve(
-      supabase
-        .from('profiles')
-        .update(snakeData)
-        .eq('id', userId)
-    ).then(({ error }) => {
-      if (error) {
-        console.error('Erro ao sincronizar perfil no Supabase (background):', error);
-      }
-    }).catch((err) => {
-      console.error('Falha de rede ao sincronizar perfil (background):', err);
-    });
+    // Remover campos que não devem ser sobrescritos
+    delete snakeData.id;
+    delete snakeData.email;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(snakeData)
+      .eq('id', user.id);
+
+    if (error) {
+      console.error('Erro ao sincronizar perfil no Supabase:', error);
+      throw error;
+    }
   };
 
 
