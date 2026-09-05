@@ -29,7 +29,7 @@ export const ProfilePage: React.FC = () => {
   const handleUpdateEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = (newEmail || '').trim().toLowerCase();
-    
+
     if (!cleanEmail) {
       showToast('Por favor, informe o novo e-mail.', 'error');
       return;
@@ -52,7 +52,7 @@ export const ProfilePage: React.FC = () => {
           .from('profiles')
           .update({ email: cleanEmail })
           .eq('id', user.id);
-        
+
         if (profileError) {
           console.warn('Aviso ao atualizar email na tabela profiles:', profileError);
         }
@@ -133,16 +133,16 @@ export const ProfilePage: React.FC = () => {
             <ShieldCheck className="w-5 h-5 flex-shrink-0" />
             <span>Para sua segurança, a alteração de e-mail requer confirmação via link enviado ao novo endereço.</span>
           </div>
-          <Input 
-            label="E-mail Atual" 
-            value={email} 
-            disabled 
+          <Input
+            label="E-mail Atual"
+            value={email}
+            disabled
             icon={<Mail className="w-4 h-4" />}
           />
-          <Input 
-            label="Novo E-mail" 
-            type="email" 
-            value={newEmail} 
+          <Input
+            label="Novo E-mail"
+            type="email"
+            value={newEmail}
             onChange={e => setNewEmail(e.target.value)}
             placeholder="novo@email.com"
             required
@@ -161,25 +161,25 @@ export const ProfilePage: React.FC = () => {
 
       <Card title="Alterar Senha">
         <form onSubmit={handleUpdatePass} className="space-y-4">
-          <Input 
-            label="Senha Atual *" 
-            type="password" 
+          <Input
+            label="Senha Atual *"
+            type="password"
             value={currentPass}
             onChange={e => setCurrentPass(e.target.value)}
             placeholder="••••••••"
             required
           />
-          <Input 
-            label="Nova Senha (mínimo 6 caracteres) *" 
-            type="password" 
+          <Input
+            label="Nova Senha (mínimo 6 caracteres) *"
+            type="password"
             value={newPass}
             onChange={e => setNewPass(e.target.value)}
             placeholder="••••••••"
             required
           />
-          <Input 
-            label="Confirmar Nova Senha *" 
-            type="password" 
+          <Input
+            label="Confirmar Nova Senha *"
+            type="password"
             value={confirmPass}
             onChange={e => setConfirmPass(e.target.value)}
             placeholder="••••••••"

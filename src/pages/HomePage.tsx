@@ -204,7 +204,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
   const colors = {
     event: 'text-secondary bg-amber-50',
-    info: 'text-primary bg-blue-50',
+    info: 'text-black bg-black/10',
     alert: 'text-rose-500 bg-rose-50'
   };
 
@@ -242,41 +242,44 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
     <div className="max-w-4xl mx-auto p-4 space-y-8">
       <ToastContainer />
 
-      <header className="flex items-center justify-between bg-secondary px-5 py-3 rounded-lg shadow-sm">
+      <header className="flex items-center justify-between bg-[#343434] px-6 py-4 rounded-xl shadow-md border border-white/5">
         <div>
-          <h1 className="text-xl font-display font-bold text-primary">Olá, {userFirstName.toUpperCase()}! 😃</h1>
-          <p className="text-primary/80 text-sm font-semibold">Seja bem-vindo(a) ao Portal de Membro</p>
+          <h1 className="text-xl font-display font-bold text-white tracking-tight">Olá, {userFirstName.toUpperCase()}!</h1>
+          <p className="text-[#EAAA00] text-sm font-medium mt-0.5">Seja bem-vindo(a) ao Portal de Membro</p>
         </div>
         <Button
           variant="ghost"
           onClick={logout}
-          className="text-primary hover:bg-primary/10 font-bold text-sm h-9 cursor-pointer"
+          className="text-white hover:bg-white/10 font-semibold text-sm h-9 px-3 rounded-lg border border-white/15 cursor-pointer transition-colors"
         >
-          <LogOut className="w-4 h-4 mr-2" />
+          <LogOut className="w-4 h-4 mr-2 text-white" />
           Sair
         </Button>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
         <div className="space-y-4 pt-6">
-          <h3 className="text-xl font-display font-bold text-primary px-2 mb-4 border-b border-muted/10 pb-2">
-            Acesso Rápido
-          </h3>
+          <div className="relative border-b border-[#E5E1DA] pb-2.5 mb-4">
+            <h3 className="text-xl font-display font-bold text-[#111111]">
+              Acesso Rápido
+            </h3>
+            <div className="absolute -bottom-[1px] left-0 w-12 h-[2px] bg-[#EAAA00] rounded-full" />
+          </div>
           {menuItems.map((item) => (
             <motion.button
               key={item.id}
-              whileHover={{ x: 5 }}
+              whileHover={{ x: 4 }}
               onClick={() => handleNavigate(item.id)}
-              className="w-full flex items-center gap-4 p-4 bg-white rounded-lg card-shadow hover:bg-primary/5 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-4 p-4 bg-white rounded-xl card-shadow border border-[#E5E1DA] hover:border-[#EAAA00]/60 hover:bg-[#FFF9EB] hover:shadow-md transition-all text-left group cursor-pointer"
             >
-              <div className="p-3 bg-primary/10 rounded-full text-primary group-hover:bg-primary group-hover:text-white transition-colors">
+              <div className="p-3 bg-[#FAF3E1] rounded-full text-[#EAAA00] group-hover:bg-[#111111] group-hover:text-[#EAAA00] transition-all shadow-sm">
                 <item.icon className="w-6 h-6" />
               </div>
               <div className="flex-1">
-                <p className="font-bold text-primary">{item.label}</p>
-                <p className="text-xs text-muted">{item.description}</p>
+                <p className="font-bold text-[#111111] group-hover:text-black transition-colors">{item.label}</p>
+                <p className="text-xs text-[#806F5F] font-medium">{item.description}</p>
               </div>
-              <ChevronRight className="w-5 h-5 text-muted" />
+              <ChevronRight className="w-5 h-5 text-[#806F5F] group-hover:text-[#111111] group-hover:translate-x-0.5 transition-all" />
             </motion.button>
           ))}
         </div>
@@ -288,20 +291,22 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
             </div>
           ) : loadError ? (
             <div className="py-8 flex flex-col items-center justify-center gap-3 flex-1 text-center">
-              <p className="text-xs text-rose-500 font-medium">{loadError}</p>
-              <Button size="sm" variant="outline" onClick={() => fetchAnnouncements(true)}>
+              <p className="text-xs text-rose-600 font-semibold">{loadError}</p>
+              <button 
+                className="bg-[#EAAA00] text-[#111111] font-bold hover:bg-[#D99B00] px-4 py-2 rounded-lg text-xs shadow-sm transition-all cursor-pointer" 
+                onClick={() => fetchAnnouncements(true)}
+              >
                 Tentar Novamente
-              </Button>
+              </button>
             </div>
           ) : displayedAnnouncements.length === 0 ? (
             <div className="py-8 flex flex-col items-center justify-center flex-1">
-              <p className="text-center text-xs text-muted italic">Nenhum aviso ativo no momento.</p>
+              <p className="text-center text-xs text-[#806F5F] italic">Nenhum aviso ativo no momento.</p>
             </div>
           ) : (
             <div className="space-y-3 overflow-y-auto pr-1 flex-1 max-h-[360px] md:max-h-[420px]">
               {displayedAnnouncements.map((notice) => {
                 const Icon = icons[notice.type] || Info;
-                const styleClass = colors[notice.type] || 'text-primary bg-blue-50';
 
                 // Calcular status do aviso para exibir selo aos administradores
                 const start = notice.startDate;
@@ -312,48 +317,48 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
                 let statusColor = '';
                 if (isFuture) {
                   statusLabel = 'Agendado';
-                  statusColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                  statusColor = 'bg-amber-50 text-amber-800 border-amber-200';
                 } else if (isPast) {
                   statusLabel = 'Expirado';
-                  statusColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                  statusColor = 'bg-rose-50 text-rose-700 border-rose-200';
                 } else {
                   statusLabel = 'Ativo';
-                  statusColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                  statusColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
                 }
 
                 return (
                   <div
                     key={notice.id}
-                    className="flex items-start justify-between gap-3 p-3 rounded-lg border border-muted/10 bg-background/25 hover:bg-background/40 transition-all shadow-sm"
+                    className="flex items-start justify-between gap-3 p-3.5 rounded-lg bg-[#FAF3E1]/40 hover:bg-[#FAF3E1]/80 transition-all border border-[#E5E1DA]"
                   >
                     <div className="flex items-start gap-3">
-                      <div className={`p-2 rounded-full shadow-inner ${styleClass}`}>
+                      <div className="p-2 rounded-full bg-[#FAF3E1] text-[#EAAA00] border border-[#EAAA00]/20 shrink-0">
                         <Icon className="w-4 h-4" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-bold text-primary leading-tight">{notice.title}</p>
+                          <p className="text-sm font-bold text-[#111111] leading-tight">{notice.title}</p>
                           {isAdminOrSecretary && (
                             <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${statusColor}`}>
                               {statusLabel}
                             </span>
                           )}
                         </div>
-                        <p className="text-[10px] text-muted font-semibold mt-1">{notice.dateInfo}</p>
+                        <p className="text-[11px] text-[#806F5F] font-semibold mt-1">{notice.dateInfo}</p>
                       </div>
                     </div>
                     {isAdminOrSecretary && (
                       <div className="flex gap-1 flex-shrink-0 self-center">
                         <button
                           onClick={() => handleEdit(notice)}
-                          className="p-1 hover:bg-primary/10 rounded text-primary transition-colors cursor-pointer"
+                          className="p-1 hover:bg-[#FAF3E1] rounded text-[#806F5F] hover:text-[#111111] transition-colors cursor-pointer"
                           title="Editar Aviso"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDelete(notice.id)}
-                          className="p-1 hover:bg-rose-50 rounded text-rose-500 transition-colors cursor-pointer"
+                          className="p-1 hover:bg-rose-50 rounded text-rose-500 hover:text-rose-700 transition-colors cursor-pointer"
                           title="Excluir Aviso"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -368,18 +373,22 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
           {isAdminOrSecretary && (
             <div className="flex gap-2 mt-auto pt-2">
-              <Button onClick={() => {
-                setEditingAnnouncement(null);
-                setFormData({
-                  title: '',
-                  dateInfo: '',
-                  type: 'info',
-                  startDate: new Date().toISOString().split('T')[0],
-                  endDate: ''
-                });
-                setIsModalOpen(true);
-              }} size="sm" className="w-full">
-                <Plus className="w-4 h-4 mr-1" /> Novo Aviso
+              <Button 
+                onClick={() => {
+                  setEditingAnnouncement(null);
+                  setFormData({
+                    title: '',
+                    dateInfo: '',
+                    type: 'info',
+                    startDate: new Date().toISOString().split('T')[0],
+                    endDate: ''
+                  });
+                  setIsModalOpen(true);
+                }} 
+                size="sm" 
+                className="w-full bg-[#343434] text-white hover:bg-[#222222] font-semibold py-2.5 transition-colors"
+              >
+                <Plus className="w-4 h-4 mr-1 text-[#EAAA00]" /> Novo Aviso
               </Button>
             </div>
           )}
@@ -398,6 +407,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
           <div className="flex gap-3 justify-end">
             <Button
               variant="outline"
+              className="border-[#E5E1DA] text-[#806F5F] hover:bg-black/5"
               onClick={() => {
                 setIsModalOpen(false);
                 setEditingAnnouncement(null);
@@ -405,7 +415,11 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
             >
               Cancelar
             </Button>
-            <Button onClick={handleSaveAnnouncement} disabled={!formData.title || !formData.dateInfo || !formData.startDate}>
+            <Button 
+              className="bg-[#EAAA00] text-[#111111] font-bold hover:bg-[#D99B00] shadow-sm transition-colors"
+              onClick={handleSaveAnnouncement} 
+              disabled={!formData.title || !formData.dateInfo || !formData.startDate}
+            >
               {editingAnnouncement ? "Salvar Alterações" : "Salvar Aviso"}
             </Button>
           </div>
@@ -413,55 +427,55 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-primary mb-1 uppercase">Título do Aviso *</label>
+            <label className="block text-xs font-bold text-[#111111] mb-1 uppercase">Título do Aviso *</label>
             <input
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               placeholder="Ex: Culto de Jovens"
-              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
+              className="w-full p-2.5 rounded-lg border border-[#E5E1DA] focus:ring-2 focus:ring-[#EAAA00]/40 focus:border-[#EAAA00] outline-none text-sm bg-white"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-primary mb-1 uppercase">Descrição de Data/Horário *</label>
+            <label className="block text-xs font-bold text-[#111111] mb-1 uppercase">Descrição de Data/Horário *</label>
             <input
               type="text"
               value={formData.dateInfo}
               onChange={(e) => setFormData({ ...formData, dateInfo: e.target.value })}
               placeholder="Ex: Domingo às 18:00"
-              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
+              className="w-full p-2.5 rounded-lg border border-[#E5E1DA] focus:ring-2 focus:ring-[#EAAA00]/40 focus:border-[#EAAA00] outline-none text-sm bg-white"
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-primary mb-1 uppercase">Data de Início *</label>
+              <label className="block text-xs font-bold text-[#111111] mb-1 uppercase">Data de Início *</label>
               <input
                 type="date"
                 value={formData.startDate}
                 onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm bg-white"
+                className="w-full p-2.5 rounded-lg border border-[#E5E1DA] focus:ring-2 focus:ring-[#EAAA00]/40 focus:border-[#EAAA00] outline-none text-sm bg-white"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-primary mb-1 uppercase">Data de Fim (Opcional)</label>
+              <label className="block text-xs font-bold text-[#111111] mb-1 uppercase">Data de Fim (Opcional)</label>
               <input
                 type="date"
                 value={formData.endDate}
                 onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm bg-white"
+                className="w-full p-2.5 rounded-lg border border-[#E5E1DA] focus:ring-2 focus:ring-[#EAAA00]/40 focus:border-[#EAAA00] outline-none text-sm bg-white"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-primary mb-1 uppercase">Tipo de Aviso *</label>
+            <label className="block text-xs font-bold text-[#111111] mb-1 uppercase">Tipo de Aviso *</label>
             <select
               value={formData.type}
               onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-              className="w-full p-2.5 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none bg-white text-sm"
+              className="w-full p-2.5 rounded-lg border border-[#E5E1DA] focus:ring-2 focus:ring-[#EAAA00]/40 focus:border-[#EAAA00] outline-none bg-white text-sm"
             >
-              <option value="info">Informativo (Azul)</option>
-              <option value="event">Evento (Amarelo)</option>
-              <option value="alert">Alerta (Vermelho)</option>
+              <option value="info">Informativo</option>
+              <option value="event">Evento</option>
+              <option value="alert">Alerta</option>
             </select>
           </div>
         </div>

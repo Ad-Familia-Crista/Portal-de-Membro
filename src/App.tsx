@@ -104,7 +104,7 @@ const AppContent: React.FC = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
       </div>
     );
   }
@@ -197,11 +197,11 @@ const AppContent: React.FC = () => {
         return (
           <Suspense fallback={<PageSkeleton />}>
             <div className="max-w-[500px] mx-auto p-4 flex flex-col items-center gap-8">
-              <h1 className="text-2xl font-display font-bold text-primary">Carteira de Membro Digital</h1>
+              <h1 className="text-2xl font-display font-bold text-black">Carteira de Membro Digital</h1>
               <DigitalIDCard member={user} />
               <div className="text-center text-sm text-muted">
                 <p>Se há alguma informação desatualizada na carteira digital, atualize seu cadastro.</p>
-                <p className="mt-2 font-bold">Válida até: {user.validUntil}</p>
+                <p className="mt-2 font-bold text-[#EAAA00]">Válida até: {user.validUntil}</p>
               </div>
             </div>
           </Suspense>
@@ -220,8 +220,8 @@ const AppContent: React.FC = () => {
       
       {currentPage !== 'home' && (
         <div className="max-w-6xl mx-auto w-full p-4">
-          <Button variant="ghost" onClick={() => setCurrentPage('home')}>
-            <ChevronLeft className="w-5 h-5 mr-2" />
+          <Button variant="ghost" className="text-[#343434] hover:bg-[#343434]/5 font-semibold" onClick={() => setCurrentPage('home')}>
+            <ChevronLeft className="w-5 h-5 mr-2 text-[#EAAA00]" />
             Voltar para o Início
           </Button>
         </div>
@@ -231,25 +231,25 @@ const AppContent: React.FC = () => {
         {renderPage()}
       </main>
 
-      <footer className="py-8 border-t border-muted/10 bg-white/50">
+      <footer className="py-8 border-t border-[#E5E1DA] bg-white/70">
         <div className="max-w-6xl mx-auto px-4 text-center">
-          <p className="text-primary font-display font-bold mb-2">Assembleia de Deus Família Cristã</p>
-          <div className="flex items-center justify-center gap-4 text-sm text-muted">
+          <p className="text-[#111111] font-display font-bold mb-2">Assembleia de Deus Família Cristã</p>
+          <div className="flex items-center justify-center gap-4 text-sm text-[#806F5F]">
             <button 
               onClick={() => setShowPrivacyModal(true)} 
-              className="hover:text-primary transition-colors cursor-pointer"
+              className="hover:text-[#111111] transition-colors cursor-pointer"
             >
               Política de Privacidade
             </button>
             <span>|</span>
             <button 
               onClick={() => setShowPrivacyModal(true)} 
-              className="hover:text-primary transition-colors cursor-pointer"
+              className="hover:text-[#111111] transition-colors cursor-pointer"
             >
               Termo de Uso
             </button>
           </div>
-          <p className="mt-4 text-[10px] text-muted/60">
+          <p className="mt-4 text-[10px] text-[#806F5F]/70">
             © {new Date().getFullYear()} Ministério Vila dos Remédios. Todos os direitos reservados.
           </p>
         </div>

@@ -163,6 +163,26 @@ const formatInitialNaturalness = (val?: string) => {
   return match || val;
 };
 
+const toDisplayDate = (val?: string | null): string => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  return str;
+};
+
+const toDisplayMonthYear = (val?: string | null): string => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^\d{4}-\d{2}$/.test(str)) {
+    const [y, m] = str.split('-');
+    return `${m}/${y}`;
+  }
+  return str;
+};
+
 interface RegistrationFormProps {
   onComplete?: () => void;
 }
@@ -211,11 +231,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       firstName: user?.firstName || '',
       cpf: user?.cpf || '',
       rg: user?.rg || '',
-      birthDate: user?.birthDate || '',
+      birthDate: toDisplayDate(user?.birthDate),
       naturalness: formatInitialNaturalness(user?.naturalness),
       nationality: user?.nationality && user.nationality !== 'Brasileiro(a)' ? user.nationality : 'Brasil',
       maritalStatus: user?.maritalStatus || '',
-      marriageDate: user?.marriageDate || '',
+      marriageDate: toDisplayDate(user?.marriageDate),
       spouseName: user?.spouseName || '',
       cep: user?.cep || '',
       address: user?.address || '',
@@ -229,7 +249,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       education: user?.education ? (user.education.startsWith('Ensino ') ? user.education : `Ensino ${user.education}`) : '',
       profession: user?.profession || '',
       baptismChurch: user?.baptismChurch || '',
-      baptismDate: user?.baptismDate || '',
+      baptismDate: toDisplayMonthYear(user?.baptismDate),
       entryDate: user?.entryDate ? String(user.entryDate) : '',
       previousChurch: user?.previousChurch || '',
       conventionName: user?.conventionName || '',
@@ -245,6 +265,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       participatesInConvention: user?.participatesInConvention ? 'Sim' : 'Não',
       children: user?.children?.map(c => ({ 
         ...c, 
+        birthDate: toDisplayDate(c.birthDate),
         congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
       })) || [],
       phones: user?.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
@@ -264,11 +285,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         firstName: user.firstName || '',
         cpf: user.cpf || '',
         rg: user.rg || '',
-        birthDate: user.birthDate || '',
+        birthDate: toDisplayDate(user.birthDate),
         naturalness: formatInitialNaturalness(user.naturalness),
         nationality: user.nationality && user.nationality !== 'Brasileiro(a)' ? user.nationality : 'Brasil',
         maritalStatus: user.maritalStatus || '',
-        marriageDate: user.marriageDate || '',
+        marriageDate: toDisplayDate(user.marriageDate),
         spouseName: user.spouseName || '',
         cep: user.cep || '',
         address: user.address || '',
@@ -282,7 +303,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         education: user.education ? (user.education.startsWith('Ensino ') ? user.education : `Ensino ${user.education}`) : '',
         profession: user.profession || '',
         baptismChurch: user.baptismChurch || '',
-        baptismDate: user.baptismDate || '',
+        baptismDate: toDisplayMonthYear(user.baptismDate),
         entryDate: user.entryDate ? String(user.entryDate) : '',
         previousChurch: user.previousChurch || '',
         conventionName: user.conventionName || '',
@@ -298,6 +319,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         participatesInConvention: user.participatesInConvention ? 'Sim' : 'Não',
         children: user.children?.map(c => ({ 
           ...c, 
+          birthDate: toDisplayDate(c.birthDate),
           congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
         })) || [],
         phones: user.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
@@ -631,11 +653,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const progress = (step / totalSteps) * 100;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-6 pb-20">
+    <div className="max-w-4xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-20">
       <ToastContainer />
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-display font-bold text-primary">Atualizar Cadastro</h1>
-        <span className="text-sm font-bold text-primary">Passo {step} de {totalSteps}</span>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <h1 className="text-xl sm:text-2xl font-display font-bold text-black">Atualizar Cadastro</h1>
+        <span className="text-xs sm:text-sm font-bold text-black bg-black/5 px-2.5 py-1 rounded-full">Passo {step} de {totalSteps}</span>
       </div>
       
       <div className="w-full bg-muted/20 h-2 rounded-full overflow-hidden mb-8">
@@ -649,7 +671,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-8">
         {step === 1 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="1 - Informações Básicas de Identificação">
+            <Card title="1 - Informações Básicas de Identificação" titleClassName="text-black">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input label="Nome Completo *" {...register('firstName')} error={errors.firstName?.message} />
                 <Controller
@@ -693,11 +715,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* Campo Naturalidade: Dropdown com todos os estados brasileiros e DF */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary">Naturalidade *</label>
+                  <label className="text-sm font-semibold text-black">Naturalidade *</label>
                   <select
                     {...register('naturalness')}
                     className={cn(
-                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer",
+                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer",
                       errors.naturalness ? "border-red-500 focus:ring-red-500/50" : "border-muted/30"
                     )}
                   >
@@ -711,11 +733,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* Nacionalidade: dropdown com todos os países do mundo */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary">Nacionalidade *</label>
+                  <label className="text-sm font-semibold text-black">Nacionalidade *</label>
                   <select
                     {...register('nationality')}
                     className={cn(
-                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer",
+                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer",
                       errors.nationality ? "border-red-500 focus:ring-red-500/50" : "border-muted/30"
                     )}
                   >
@@ -733,14 +755,14 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 2 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="2 - Informações Conjugais e Familiares">
+            <Card title="2 - Informações Conjugais e Familiares" titleClassName="text-black">
               <div className="space-y-6">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary">Estado Civil *</label>
+                  <label className="text-sm font-semibold text-black">Estado Civil *</label>
                   <select 
                     {...register('maritalStatus')} 
                     className={cn(
-                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer",
+                      "flex h-10 w-full rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer",
                       errors.maritalStatus ? "border-red-500 focus:ring-red-500/50" : "border-muted/30"
                     )}
                   >
@@ -777,7 +799,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* Pergunta de Filhos */}
                 <div className="space-y-2 pt-2 border-t border-muted/10">
-                  <label className="text-sm font-semibold text-primary block leading-relaxed">
+                  <label className="text-sm font-semibold text-black block leading-relaxed">
                     Possui filho(s), criança(s) ou adolescente(s) menor(es) de 13 anos que congregam com você? *
                   </label>
                   <div className={cn("flex gap-6 p-2 rounded-md", errors.hasChildren && "border border-red-500 bg-red-50/20")}>
@@ -786,7 +808,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         type="radio" 
                         value="Sim" 
                         {...register('hasChildren')} 
-                        className="w-4 h-4 accent-primary cursor-pointer"
+                        className="w-4 h-4 accent-black cursor-pointer"
                       /> 
                       Sim
                     </label>
@@ -795,7 +817,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         type="radio" 
                         value="Não" 
                         {...register('hasChildren')} 
-                        className="w-4 h-4 accent-primary cursor-pointer"
+                        className="w-4 h-4 accent-black cursor-pointer"
                       /> 
                       Não
                     </label>
@@ -806,11 +828,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                 {hasChildren === 'Sim' && (
                   <div className="space-y-4 pt-4 border-t border-muted/10 animate-in fade-in">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-bold text-primary">Cadastro de filho(s) ou dependente(s)</h4>
+                      <h4 className="text-sm font-bold text-black">Cadastro de filho(s) ou dependente(s)</h4>
                       <Button 
                         type="button" 
                         size="sm" 
                         variant="outline" 
+                        className="border-black text-black hover:bg-black/10 focus:ring-black/30"
                         onClick={() => appendChild({ name: '', cpf: '', birthDate: '', congregates: 'Sim' })}
                       >
                         <Plus className="w-4 h-4 mr-2" /> Adicionar Filho
@@ -828,22 +851,26 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                     {childFields.map((field, index) => {
                       const childCpfError = childCpfDbErrors[index] || errors.children?.[index]?.cpf?.message;
                       return (
-                        <div key={field.id} className="p-4 bg-background/30 rounded-lg border border-muted/10 space-y-4 relative shadow-sm">
-                          <button 
-                            type="button" 
-                            onClick={() => {
-                              removeChild(index);
-                              setChildCpfDbErrors(prev => {
-                                const next = { ...prev };
-                                delete next[index];
-                                return next;
-                              });
-                            }} 
-                            className="absolute top-2 right-2 text-rose-500 hover:bg-rose-50 p-1.5 rounded cursor-pointer transition-colors"
-                            title="Remover filho"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <div key={field.id} className="p-4 bg-background/30 rounded-lg border border-muted/10 space-y-4 shadow-sm">
+                          <div className="flex items-center justify-between pb-2 border-b border-muted/10">
+                            <span className="text-xs font-bold text-black uppercase tracking-wider">Dependente #{index + 1}</span>
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                removeChild(index);
+                                setChildCpfDbErrors(prev => {
+                                  const next = { ...prev };
+                                  delete next[index];
+                                  return next;
+                                });
+                              }} 
+                              className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded cursor-pointer transition-colors flex items-center gap-1 text-xs font-medium"
+                              title="Remover dependente"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remover</span>
+                            </button>
+                          </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <Input
@@ -895,11 +922,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                           {isAdminOrSecretary && (
                             <div className="pt-2 space-y-2 border-t border-muted/10">
-                              <label className="text-xs font-bold text-primary uppercase">Departamento Atual (Admin/Sec Only)</label>
+                              <label className="text-xs font-bold text-black uppercase">Departamento Atual (Admin/Sec Only)</label>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 {CHILD_DEPARTMENTS.map(dept => (
                                   <label key={dept} className="flex items-center gap-2 text-xs p-2 bg-white rounded border border-muted/10 cursor-pointer">
-                                    <input type="checkbox" value={dept} {...register(`children.${index}.departments`)} className="w-3 h-3" />
+                                    <input type="checkbox" value={dept} {...register(`children.${index}.departments`)} className="w-3 h-3 accent-black" />
                                     {dept}
                                   </label>
                                 ))}
@@ -918,22 +945,22 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 3 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="3 - Endereço">
+            <Card title="3 - Endereço" titleClassName="text-black">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary">CEP *</label>
+                  <label className="text-sm font-semibold text-black">CEP *</label>
                   <input
                     {...register('cep')}
                     onChange={handleCEPChange}
                     placeholder="00000-000"
-                    className="flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className="flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/30"
                   />
                   {(errors.cep || cepError) && <p className="text-xs text-red-500">{errors.cep?.message || cepError}</p>}
                 </div>
 
                 {/* Endereço - protegido quando preenchido pelo CEP */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                  <label className="text-sm font-semibold text-black flex items-center gap-1.5">
                     Endereço *
                     {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
                   </label>
@@ -944,7 +971,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
                       cepLocked
                         ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
-                        : "border-muted/30 bg-white focus:ring-primary/50",
+                        : "border-muted/30 bg-white focus:ring-black/30",
                       errors.address && "border-red-500"
                     )}
                   />
@@ -956,7 +983,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* Bairro - protegido quando preenchido pelo CEP */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                  <label className="text-sm font-semibold text-black flex items-center gap-1.5">
                     Bairro *
                     {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
                   </label>
@@ -967,7 +994,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
                       cepLocked
                         ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
-                        : "border-muted/30 bg-white focus:ring-primary/50",
+                        : "border-muted/30 bg-white focus:ring-black/30",
                       errors.neighborhood && "border-red-500"
                     )}
                   />
@@ -976,7 +1003,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* Cidade - protegido quando preenchido pelo CEP */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                  <label className="text-sm font-semibold text-black flex items-center gap-1.5">
                     Cidade *
                     {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
                   </label>
@@ -987,7 +1014,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
                       cepLocked
                         ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
-                        : "border-muted/30 bg-white focus:ring-primary/50",
+                        : "border-muted/30 bg-white focus:ring-black/30",
                       errors.city && "border-red-500"
                     )}
                   />
@@ -996,7 +1023,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 {/* UF - protegido quando preenchido pelo CEP */}
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                  <label className="text-sm font-semibold text-black flex items-center gap-1.5">
                     UF *
                     {cepLocked && <Lock className="w-3 h-3 text-muted/60" title="Preenchido automaticamente pelo CEP" />}
                   </label>
@@ -1007,7 +1034,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       "flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-colors",
                       cepLocked
                         ? "border-muted/20 bg-muted/10 text-muted/80 cursor-not-allowed focus:ring-0"
-                        : "border-muted/30 bg-white focus:ring-primary/50",
+                        : "border-muted/30 bg-white focus:ring-black/30",
                       errors.state && "border-red-500"
                     )}
                   />
@@ -1027,7 +1054,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 4 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="4 - Contato">
+            <Card title="4 - Contato" titleClassName="text-black">
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Controller
@@ -1048,8 +1075,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                 <div className="space-y-4 pt-4 border-t border-muted/10">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold text-primary">Outros Telefones</h4>
-                    <Button type="button" size="sm" variant="outline" onClick={() => appendPhone({ number: '' })}>
+                    <h4 className="text-sm font-bold text-black">Outros Telefones</h4>
+                    <Button type="button" size="sm" variant="outline" className="border-black text-black hover:bg-black/10 focus:ring-black/30" onClick={() => appendPhone({ number: '' })}>
                       <Plus className="w-4 h-4 mr-2" /> Adicionar Telefone
                     </Button>
                   </div>
@@ -1084,13 +1111,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 5 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="5 - Informações Profissionais">
+            <Card title="5 - Informações Profissionais" titleClassName="text-black">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-primary">Escolaridade</label>
+                  <label className="text-sm font-semibold text-black">Escolaridade</label>
                   <select 
                     {...register('education')}
-                    className="w-full h-10 px-3 rounded-md border border-muted/30 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    className="w-full h-10 px-3 rounded-md border border-muted/30 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-black/30 transition-all cursor-pointer"
                   >
                     <option value="">Selecione...</option>
                     <option value="Ensino Fundamental Incompleto">Ensino Fundamental Incompleto</option>
@@ -1109,19 +1136,19 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 6 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="6 - Informações Espirituais">
+            <Card title="6 - Informações Espirituais" titleClassName="text-black">
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                   {/* 1. Batizado nas Águas */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary">Você é batizado(a) nas Águas? *</label>
+                    <label className="text-sm font-semibold text-black">Você é batizado(a) nas águas? *</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Sim" {...register('isBaptized')} /> Sim
+                        <input type="radio" value="Sim" {...register('isBaptized')} className="accent-black" /> Sim
                       </label>
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Não" {...register('isBaptized')} /> Não
+                        <input type="radio" value="Não" {...register('isBaptized')} className="accent-black" /> Não
                       </label>
                     </div>
                   </div>
@@ -1167,20 +1194,20 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                   {/* 5. Batizado no Espírito Santo */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary">Você é batizado(a) com Espírito Santo? *</label>
+                    <label className="text-sm font-semibold text-black">Você é batizado(a) com Espírito Santo? *</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Sim" {...register('isHolySpiritBaptized')} /> Sim
+                        <input type="radio" value="Sim" {...register('isHolySpiritBaptized')} className="accent-black" /> Sim
                       </label>
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Não" {...register('isHolySpiritBaptized')} /> Não
+                        <input type="radio" value="Não" {...register('isHolySpiritBaptized')} className="accent-black" /> Não
                       </label>
                     </div>
                   </div>
 
                   {/* 6. Convenção com tooltip explicativo */}
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-primary flex items-center gap-2">
+                    <label className="text-sm font-semibold text-black flex items-center gap-2">
                       Participa de alguma convenção?
                       <div className="relative">
                         <button
@@ -1189,25 +1216,25 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                           onMouseEnter={() => setShowConventionTooltip(true)}
                           onMouseLeave={() => setShowConventionTooltip(false)}
                           aria-label="O que é convenção?"
-                          className="text-primary/60 hover:text-primary transition-colors focus:outline-none cursor-pointer"
+                          className="text-black/60 hover:text-black transition-colors focus:outline-none cursor-pointer"
                         >
                           <HelpCircle className="w-4 h-4" />
                         </button>
                         {showConventionTooltip && (
-                          <div className="absolute left-6 -top-1 z-50 w-64 bg-primary text-white text-xs rounded-lg p-3 shadow-xl leading-relaxed">
+                          <div className="absolute left-0 sm:left-6 top-6 sm:-top-1 z-50 w-[min(calc(100vw-3rem),16rem)] bg-black text-white text-xs rounded-lg p-3 shadow-xl leading-relaxed">
                             <p className="font-semibold mb-1">O que é uma convenção?</p>
                             <p>Convenção é a associação que reúne várias igrejas locais e pastores de uma mesma denominação ou fé.</p>
-                            <div className="absolute left-[-6px] top-3 w-0 h-0 border-t-[6px] border-t-transparent border-r-[6px] border-r-primary border-b-[6px] border-b-transparent" />
+                            <div className="hidden sm:block absolute left-[-6px] top-3 w-0 h-0 border-t-[6px] border-t-transparent border-r-[6px] border-r-black border-b-[6px] border-b-transparent" />
                           </div>
                         )}
                       </div>
                     </label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Sim" {...register('participatesInConvention')} /> Sim
+                        <input type="radio" value="Sim" {...register('participatesInConvention')} className="accent-black" /> Sim
                       </label>
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="radio" value="Não" {...register('participatesInConvention')} /> Não
+                        <input type="radio" value="Não" {...register('participatesInConvention')} className="accent-black" /> Não
                       </label>
                     </div>
                   </div>
@@ -1220,7 +1247,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 7 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="7 - Evolução Ministerial">
+            <Card title="7 - Evolução Ministerial" titleClassName="text-black">
               <div className="space-y-6">
                 {/* Summary for Member */}
                 {!isAdminOrSecretary && (
@@ -1230,21 +1257,21 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       <p className="text-xs font-medium">Esta seção é de preenchimento exclusivo da Secretaria ou Administrador. Seus dados atuais estão visíveis abaixo apenas para conferência.</p>
                     </div>
 
-                    <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 space-y-4">
+                    <div className="bg-black/5 p-4 rounded-xl border border-black/10 space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted uppercase font-bold">Cargo Atual</p>
-                          <p className="text-sm font-bold text-primary">{watch('currentPosition')}</p>
+                          <p className="text-sm font-bold text-black">{watch('currentPosition')}</p>
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted uppercase font-bold">Departamentos</p>
-                          <p className="text-sm font-bold text-primary">
+                          <p className="text-sm font-bold text-black">
                             {watch('departments')?.length > 0 ? watch('departments').join(', ') : 'Nenhum'}
                           </p>
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted uppercase font-bold">Tempo no Cargo</p>
-                          <p className="text-sm font-bold text-primary">
+                          <p className="text-sm font-bold text-black">
                             {(() => {
                               const startStr = watch('positionStartDate');
                               if (!startStr) return 'N/A';
@@ -1272,12 +1299,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                               <div className="absolute -left-[13px] top-1.5 w-3 h-3 rounded-full bg-secondary border-2 border-white shadow-sm" />
                               <div className="space-y-1">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-xs font-bold text-primary">
+                                  <span className="text-xs font-bold text-black">
                                     📅 {new Date(event.date).getFullYear()}
                                   </span>
                                   <span className="text-[10px] text-muted font-mono">{event.date}</span>
                                 </div>
-                                <p className="text-sm text-primary font-medium">{event.description}</p>
+                                <p className="text-sm text-black font-medium">{event.description}</p>
                               </div>
                             </div>
                           ))
@@ -1294,41 +1321,41 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                   <div className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-primary">Recebido como</label>
+                        <label className="text-sm font-semibold text-black">Recebido como</label>
                         <div className="flex gap-4">
                           <label className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input type="radio" value="MEMBRO" {...register('receivedAs')} /> Membro
+                            <input type="radio" value="MEMBRO" {...register('receivedAs')} className="accent-black" /> Membro
                           </label>
                           <label className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input type="radio" value="CONGREGADO" {...register('receivedAs')} /> Congregado
+                            <input type="radio" value="CONGREGADO" {...register('receivedAs')} className="accent-black" /> Congregado
                           </label>
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-primary">Cargo Atual</label>
+                        <label className="text-sm font-semibold text-black">Cargo Atual</label>
                         <select 
                           {...register('currentPosition')}
-                          className="w-full p-2 rounded border border-muted/20 text-sm bg-white h-10 cursor-pointer"
+                          className="w-full p-2 rounded border border-muted/20 text-sm bg-white h-10 cursor-pointer focus:outline-none focus:ring-2 focus:ring-black/30"
                         >
                           {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-primary">Data de Início no Cargo</label>
+                        <label className="text-sm font-semibold text-black">Data de Início no Cargo</label>
                         <input 
                           type="date" 
                           {...register('positionStartDate')}
-                          className="w-full p-2 rounded border border-muted/20 text-sm h-10"
+                          className="w-full p-2 rounded border border-muted/20 text-sm h-10 focus:outline-none focus:ring-2 focus:ring-black/30"
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-sm font-semibold text-primary">Departamento Atual (Múltipla escolha)</label>
+                      <label className="text-sm font-semibold text-black">Departamento Atual (Múltipla escolha)</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                         {DEPARTMENTS.map(dept => (
                           <label key={dept} className="flex items-center gap-2 text-xs p-2 bg-background/50 rounded border border-muted/10 cursor-pointer">
-                            <input type="checkbox" value={dept} {...register('departments')} className="w-3 h-3" />
+                            <input type="checkbox" value={dept} {...register('departments')} className="w-3 h-3 accent-black" />
                             {dept}
                           </label>
                         ))}
@@ -1337,10 +1364,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-muted/5">
                       <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-primary">Consagrado a:</label>
+                        <label className="text-sm font-semibold text-black">Consagrado a:</label>
                         <select
                           {...register('consecratedTo')}
-                          className="flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+                          className="flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer"
                         >
                           <option value="">Selecione...</option>
                           {CONSECRATIONS.map(c => (
@@ -1349,11 +1376,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-sm font-semibold text-primary">Data da Consagração</label>
+                        <label className="text-sm font-semibold text-black">Data da Consagração</label>
                         <input 
                           type="date" 
                           {...register('consecrationDate')}
-                          className="w-full p-2 rounded border border-muted/20 text-sm h-10"
+                          className="w-full p-2 rounded border border-muted/20 text-sm h-10 focus:outline-none focus:ring-2 focus:ring-black/30"
                         />
                       </div>
                     </div>
@@ -1369,12 +1396,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             <div className="absolute -left-[13px] top-1.5 w-3 h-3 rounded-full bg-secondary border-2 border-white shadow-sm" />
                             <div className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-primary">
+                                <span className="text-xs font-bold text-black">
                                   📅 {new Date(event.date).getFullYear()}
                                 </span>
                                 <span className="text-[10px] text-muted font-mono">{event.date}</span>
                               </div>
-                              <p className="text-sm text-primary font-medium">{event.description}</p>
+                              <p className="text-sm text-black font-medium">{event.description}</p>
                               <p className="text-[10px] text-muted">Registrado por: {event.registeredBy}</p>
                             </div>
                           </div>
@@ -1390,7 +1417,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
         {step === 8 && (
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card title="8 - Anexar Arquivo de Foto 3x3">
+            <Card title="8 - Anexar Arquivo de Foto 3x3" titleClassName="text-black">
               <div className="space-y-6">
                 <Controller
                   name="photoUrl"
@@ -1444,13 +1471,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         
                         {field.value ? (
                           <div className="flex flex-col items-center justify-center p-6 border border-muted/15 rounded-xl bg-background/30 gap-4">
-                            <div className="w-44 h-44 rounded-xl border-2 border-primary/20 overflow-hidden shadow-lg bg-white flex items-center justify-center relative group">
+                            <div className="w-44 h-44 rounded-xl border-2 border-black/20 overflow-hidden shadow-lg bg-white flex items-center justify-center relative group">
                               <img src={field.value} alt="Foto do Membro" className="w-full h-full object-cover" />
                               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                 <button
                                   type="button"
                                   onClick={handleReCrop}
-                                  className="p-2 bg-white rounded-full text-primary shadow hover:scale-105 transition-transform"
+                                  className="p-2 bg-white rounded-full text-black shadow hover:scale-105 transition-transform"
                                   title="Ajustar Enquadramento"
                                 >
                                   <Crop className="w-5 h-5" />
@@ -1458,10 +1485,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                               </div>
                             </div>
                             <div className="flex flex-wrap justify-center gap-2">
-                              <Button type="button" size="sm" variant="outline" onClick={handleReCrop} className="flex items-center gap-1">
+                              <Button type="button" size="sm" variant="outline" className="border-black text-black hover:bg-black/10 focus:ring-black/30 flex items-center gap-1" onClick={handleReCrop}>
                                 <Crop className="w-3.5 h-3.5" /> Ajustar Enquadramento
                               </Button>
-                              <Button type="button" size="sm" onClick={triggerFileInput}>
+                              <Button type="button" size="sm" className="bg-black text-white hover:bg-black/90 focus:ring-black/30" onClick={triggerFileInput}>
                                 Alterar Foto
                               </Button>
                               <Button type="button" size="sm" variant="outline" className="text-rose-600 border-rose-200 hover:bg-rose-50" onClick={removePhoto}>
@@ -1472,12 +1499,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         ) : (
                           <div 
                             onClick={triggerFileInput}
-                            className="border-2 border-dashed border-muted/30 rounded-xl p-10 text-center hover:border-primary transition-all cursor-pointer bg-background/20 group"
+                            className="border-2 border-dashed border-muted/30 rounded-xl p-10 text-center hover:border-black transition-all cursor-pointer bg-background/20 group"
                           >
-                            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-primary group-hover:text-white transition-colors">
+                            <div className="w-16 h-16 bg-black/10 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-black group-hover:text-white transition-colors">
                               <Camera className="w-8 h-8" />
                             </div>
-                            <p className="text-primary font-bold">Clique para anexar sua foto 3x3</p>
+                            <p className="text-black font-bold">Clique para anexar sua foto 3x3</p>
                             <p className="text-xs text-muted mt-2">Você poderá enquadrar e recortar a foto antes de salvar.</p>
                             <p className="text-[10px] text-muted/70 mt-1">Formatos aceitos: JPG, PNG, WEBP (Máx 10MB)</p>
                           </div>
@@ -1487,15 +1514,15 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                   }}
                 />
 
-                <div className="bg-primary/5 rounded-xl p-6 border border-primary/10 space-y-4">
-                  <div className="flex items-center gap-2 text-primary font-bold mb-2">
+                <div className="bg-black/5 rounded-xl p-6 border border-black/10 space-y-4">
+                  <div className="flex items-center gap-2 text-black font-bold mb-2">
                     <InfoIcon className="w-5 h-5" />
                     <span>Instruções para a Foto</span>
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs leading-relaxed">
                     <div className="space-y-3">
-                      <p className="font-bold text-primary uppercase tracking-wider">Enquadramento e Postura</p>
+                      <p className="font-bold text-black uppercase tracking-wider">Enquadramento e Postura</p>
                       <ul className="list-disc pl-4 space-y-1 text-muted">
                         <li>Formato: Vertical (3x3 cm).</li>
                         <li>Posição: De frente para a câmera.</li>
@@ -1505,7 +1532,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       </ul>
                     </div>
                     <div className="space-y-3">
-                      <p className="font-bold text-primary uppercase tracking-wider">Vestimenta e Dicas</p>
+                      <p className="font-bold text-black uppercase tracking-wider">Vestimenta e Dicas</p>
                       <ul className="list-disc pl-4 space-y-1 text-muted">
                         <li>Evite roupas brancas (fundo branco).</li>
                         <li>Sem acessórios grandes que cubram o rosto.</li>
@@ -1521,31 +1548,42 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
           </motion.div>
         )}
 
-        <div className="flex items-center justify-between pt-6 border-t border-muted/10">
-          <Button type="button" variant="outline" onClick={prevStep} disabled={step === 1 || isValidatingStep}>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-6 border-t border-muted/10">
+          <Button 
+            type="button" 
+            variant="outline" 
+            className="border-black text-black hover:bg-black/10 focus:ring-black/30 w-full sm:w-auto h-11" 
+            onClick={prevStep} 
+            disabled={step === 1 || isValidatingStep}
+          >
             Anterior
           </Button>
           
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
             {step === totalSteps ? (
-              <div className="flex flex-col items-end gap-4">
-                <p className="text-[10px] text-muted max-w-[300px] text-right italic">
+              <div className="flex flex-col items-stretch sm:items-end gap-3 w-full sm:w-auto">
+                <p className="text-[11px] text-muted max-w-[320px] text-center sm:text-right italic">
                   “Ao atualizar seus dados, você confirma que as informações são verdadeiras e estão de acordo com nossa Política de Privacidade.”
                 </p>
                 <Button 
                   type="submit" 
                   variant="secondary" 
                   size="lg" 
-                  className="px-12"
+                  className="w-full sm:w-auto px-8 sm:px-12 h-11"
                   disabled={isSubmittingForm}
                 >
                   {isSubmittingForm ? 'Salvando...' : 'Salvar Cadastro'}
                 </Button>
               </div>
             ) : (
-              <Button type="button" onClick={nextStep} disabled={isValidatingStep}>
+              <Button 
+                type="button" 
+                className="bg-black text-white hover:bg-black/90 focus:ring-black/30 w-full sm:w-auto h-11" 
+                onClick={nextStep} 
+                disabled={isValidatingStep}
+              >
                 {isValidatingStep ? (
-                  <span className="flex items-center gap-2">
+                  <span className="flex items-center justify-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" /> Verificando...
                   </span>
                 ) : (
@@ -1570,9 +1608,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
       <footer className="mt-12 pt-8 border-t border-muted/10 text-center">
         <div className="flex justify-center gap-4 text-xs text-muted">
-          <button type="button" className="hover:text-primary transition-colors cursor-pointer">Política de Privacidade</button>
+          <button type="button" className="hover:text-black transition-colors cursor-pointer">Política de Privacidade</button>
           <span className="text-muted/30">|</span>
-          <button type="button" className="hover:text-primary transition-colors cursor-pointer">Termo de Uso</button>
+          <button type="button" className="hover:text-black transition-colors cursor-pointer">Termo de Uso</button>
         </div>
       </footer>
     </div>

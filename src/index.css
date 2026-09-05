@@ -6,10 +6,12 @@
   --font-display: "Montserrat", sans-serif;
   --font-script: "Dancing Script", cursive;
 
-  --color-primary: #466486;
-  --color-secondary: #E9AA2F;
-  --color-background: #EDE9D8;
-  --color-muted: #95836C;
+  --color-primary: #343434;
+  --color-secondary: #EAAA00;
+  --color-background: #E7E3DA;
+  --color-muted: #806F5F;
+  --color-cream: #FAF3E1;
+  --color-border: #E5E1DA;
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -19,17 +21,23 @@
   body {
     @apply bg-background text-primary font-sans;
   }
-  h1, h2, h3, h4, h5, h6 {
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-display font-bold;
   }
 }
 
 .card-shadow {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
 }
 
-.id-card-gradient {
-  background: linear-gradient(135deg, #466486 0%, #2D4158 100%);
+.id-card-bg {
+  background: #26292E;
 }
 
 @media print {
@@ -41,7 +49,7 @@
     -webkit-print-color-adjust: exact;
     padding: 1cm !important;
   }
-  
+
   /* Esconder navegação, cabeçalho, botões e filtros */
   .no-print,
   button,
@@ -71,7 +79,7 @@
 
   /* Formatar cards e evitar quebra no meio do gráfico */
   section,
-  .grid > div,
+  .grid>div,
   table {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
@@ -95,13 +103,23 @@
     border-collapse: collapse !important;
   }
 
-  th, td {
+  th,
+  td {
     border-bottom: 1px solid #e2e8f0 !important;
     padding: 8px !important;
   }
 
   /* Cores escuras para texto de alta qualidade na impressão */
-  h1, h2, h3, h4, h5, h6, p, td, th, span {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  p,
+  td,
+  th,
+  span {
     color: #1E2A4A !important;
   }
 }

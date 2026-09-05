@@ -99,8 +99,8 @@ export const LoginPage: React.FC = () => {
         className="w-full max-w-md"
       >
         <div className="text-center mb-10 relative flex flex-col items-center">
-          <Logo className="mb-4" />
-          <h1 className="text-4xl sm:text-5xl font-display font-bold text-primary tracking-[0.2em] uppercase leading-none">
+          <Logo className="mb-4 w-48 h-48" />
+          <h1 className="text-4xl sm:text-5xl font-display font-bold text-black tracking-[0.2em] uppercase leading-none">
             Assembleia
           </h1>
           <div className="font-script text-5xl sm:text-6xl text-secondary -mt-6 sm:-mt-8 ml-12 sm:ml-16 relative z-10 drop-shadow-sm">
@@ -114,7 +114,7 @@ export const LoginPage: React.FC = () => {
         <Card className="p-8 border-t-4 border-secondary">
           {isRecovering ? (
             <div>
-              <div className="flex items-center justify-center gap-2 mb-2 text-primary">
+              <div className="flex items-center justify-center gap-2 mb-2 text-black">
                 <KeyRound className="w-6 h-6 text-secondary" />
                 <h2 className="text-2xl font-display font-bold">Recuperar Senha</h2>
               </div>
@@ -133,7 +133,7 @@ export const LoginPage: React.FC = () => {
                   className="uppercase"
                 />
 
-                <Button type="submit" className="w-full" size="lg" disabled={isSubmitting}>
+                <Button type="submit" className="w-full bg-black hover:bg-black/80 focus:ring-black/30 border-black" size="lg" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <span className="flex items-center justify-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -147,7 +147,7 @@ export const LoginPage: React.FC = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full mt-2"
+                  className="w-full mt-2 border-black text-black hover:bg-black/10 focus:ring-black/30"
                   onClick={() => setIsRecovering(false)}
                 >
                   <ArrowLeft className="w-4 h-4 mr-2" />
@@ -157,7 +157,7 @@ export const LoginPage: React.FC = () => {
             </div>
           ) : (
             <div>
-              <h2 className="text-2xl font-display font-bold text-primary mb-6 text-center">
+              <h2 className="text-2xl font-display font-bold text-black mb-6 text-center">
                 {isRegistering ? 'Criar Conta' : 'Acesso ao Portal'}
               </h2>
 
@@ -202,14 +202,14 @@ export const LoginPage: React.FC = () => {
                     <button 
                       type="button" 
                       onClick={() => setIsRecovering(true)} 
-                      className="text-sm text-primary hover:underline cursor-pointer"
+                      className="text-sm text-black hover:underline cursor-pointer"
                     >
                       Esqueci minha senha
                     </button>
                   </div>
                 )}
 
-                <Button type="submit" className="w-full" size="lg" disabled={isSubmitting}>
+                <Button type="submit" className="w-full bg-black hover:bg-black/80 focus:ring-black/30 border-black" size="lg" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <span className="flex items-center justify-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -227,7 +227,7 @@ export const LoginPage: React.FC = () => {
                 </p>
                 <Button
                   variant="outline"
-                  className="w-full"
+                  className="w-full border-black text-black hover:bg-black/10 focus:ring-black/30"
                   onClick={() => setIsRegistering(!isRegistering)}
                 >
                   {isRegistering ? 'Fazer Login' : 'Cadastre-se'}

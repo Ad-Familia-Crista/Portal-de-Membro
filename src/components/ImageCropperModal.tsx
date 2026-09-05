@@ -131,11 +131,11 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       onClose={onClose}
       title="Ajustar Enquadramento da Foto"
       footer={
-        <div className="flex items-center justify-between w-full">
-          <Button variant="outline" onClick={onClose}>
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 w-full">
+          <Button variant="outline" className="border-black text-black hover:bg-black/10 w-full sm:w-auto" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={handleConfirmCrop} className="flex items-center gap-2">
+          <Button onClick={handleConfirmCrop} className="bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2 w-full sm:w-auto">
             <Check className="w-4 h-4" /> Confirmar Enquadramento
           </Button>
         </div>
@@ -147,7 +147,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
         </p>
 
         {/* Viewport de recorte com guia 3x3 */}
-        <div className="relative mx-auto w-72 h-72 sm:w-80 sm:h-80 bg-neutral-900 rounded-xl overflow-hidden shadow-inner select-none cursor-grab active:cursor-grabbing border border-muted/20">
+        <div className="relative mx-auto w-full max-w-[280px] sm:max-w-[320px] aspect-square bg-neutral-900 rounded-xl overflow-hidden shadow-inner select-none cursor-grab active:cursor-grabbing border border-muted/20">
           <div
             ref={containerRef}
             onPointerDown={handlePointerDown}
@@ -195,7 +195,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
           <button
             type="button"
             onClick={() => setZoom((z) => Math.max(0.5, z - 0.15))}
-            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-primary transition-colors cursor-pointer"
+            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-black transition-colors cursor-pointer"
             title="Diminuir Zoom"
           >
             <ZoomOut className="w-4 h-4" />
@@ -208,13 +208,13 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
             step="0.05"
             value={zoom}
             onChange={(e) => setZoom(parseFloat(e.target.value))}
-            className="flex-1 accent-primary cursor-pointer h-2 bg-muted/20 rounded-lg"
+            className="flex-1 accent-black cursor-pointer h-2 bg-muted/20 rounded-lg"
           />
 
           <button
             type="button"
             onClick={() => setZoom((z) => Math.min(3.5, z + 0.15))}
-            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-primary transition-colors cursor-pointer"
+            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-black transition-colors cursor-pointer"
             title="Aumentar Zoom"
           >
             <ZoomIn className="w-4 h-4" />
@@ -223,7 +223,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
           <button
             type="button"
             onClick={handleReset}
-            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-primary transition-colors cursor-pointer ml-1"
+            className="p-2 hover:bg-muted/10 rounded text-muted hover:text-black transition-colors cursor-pointer ml-1"
             title="Redefinir Posição e Zoom"
           >
             <RotateCcw className="w-4 h-4" />

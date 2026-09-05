@@ -50,6 +50,24 @@ export const DatePickerInput = React.forwardRef<HTMLInputElement, DatePickerInpu
       return '';
     };
 
+    // Converte valor para formato visual no campo de texto se tiver vindo como YYYY-MM-DD
+    const getDisplayValue = (): string => {
+      if (!value) return '';
+      const str = value.trim();
+      if (mode === 'month') {
+        if (/^\d{4}-\d{2}$/.test(str)) {
+          const [y, m] = str.split('-');
+          return `${m}/${y}`;
+        }
+        return str;
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        const [y, m, d] = str.split('-');
+        return `${d}/${m}/${y}`;
+      }
+      return str;
+    };
+
     const handleTextInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
       const formatted = mode === 'month' ? maskMonthYear(raw) : maskDate(raw);
@@ -84,20 +102,14 @@ export const DatePickerInput = React.forwardRef<HTMLInputElement, DatePickerInpu
       }
     };
 
-    const openCalendarPicker = () => {
+    const handleNativePickerClick = (e: React.MouseEvent<HTMLInputElement>) => {
       if (disabled) return;
       try {
-        if (hiddenDateInputRef.current) {
-          if (typeof hiddenDateInputRef.current.showPicker === 'function') {
-            hiddenDateInputRef.current.showPicker();
-          } else {
-            hiddenDateInputRef.current.focus();
-            hiddenDateInputRef.current.click();
-          }
+        if (typeof (e.target as HTMLInputElement).showPicker === 'function') {
+          (e.target as HTMLInputElement).showPicker();
         }
       } catch (err) {
-        // Fallback para navegadores mais antigos
-        hiddenDateInputRef.current?.click();
+        // Deixa o clique padrão nativo atuar
       }
     };
 
@@ -106,7 +118,7 @@ export const DatePickerInput = React.forwardRef<HTMLInputElement, DatePickerInpu
     return (
       <div className="w-full space-y-1.5">
         {label && (
-          <label className="text-sm font-semibold text-primary block">
+          <label className="text-sm font-semibold text-black block">
             {label}
           </label>
         )}
@@ -115,19 +127,20 @@ export const DatePickerInput = React.forwardRef<HTMLInputElement, DatePickerInpu
             ref={ref}
             type="text"
             inputMode="numeric"
-            value={value}
+            value={getDisplayValue()}
             onChange={handleTextInputChange}
             placeholder={placeholder || defaultPlaceholder}
             disabled={disabled}
             className={cn(
-              'flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 pr-16 text-sm ring-offset-white placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors',
+              'flex h-10 w-full rounded-md border border-muted/30 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-black/30 disabled:cursor-not-allowed disabled:opacity-50 transition-colors',
+              value ? 'pr-20' : 'pr-12',
               error && 'border-red-500 focus:ring-red-500/50 bg-red-50/10',
               className
             )}
             {...props}
           />
 
-          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 z-20">
             {/* Botão de limpar quando houver valor preenchido */}
             {value && !disabled && (
               <button
@@ -135,38 +148,37 @@ export const DatePickerInput = React.forwardRef<HTMLInputElement, DatePickerInpu
                 onClick={handleClear}
                 aria-label="Limpar data"
                 title="Limpar data"
-                className="p-1 text-muted/60 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors focus:outline-none cursor-pointer"
+                className="w-7 h-7 flex items-center justify-center text-muted/60 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors focus:outline-none cursor-pointer"
               >
                 <span className="text-xs font-bold leading-none">✕</span>
               </button>
             )}
 
-            {/* Botão de abrir calendário */}
-            <button
-              type="button"
-              onClick={openCalendarPicker}
-              disabled={disabled}
-              aria-label={`Selecionar ${label || 'data'} no calendário`}
-              title="Abrir calendário"
+            {/* Container do botão de abrir calendário com o input nativo sobreposto */}
+            <div
               className={cn(
-                "p-1 text-primary/70 hover:text-primary hover:bg-primary/10 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer",
+                "relative w-9 h-9 flex items-center justify-center rounded-md hover:bg-black/10 active:bg-black/15 transition-colors cursor-pointer",
                 disabled && "opacity-40 cursor-not-allowed hover:bg-transparent"
               )}
+              title="Abrir calendário"
             >
-              <Calendar className="w-4 h-4 text-primary" />
-            </button>
-          </div>
+              <Calendar className="w-4 h-4 text-black pointer-events-none" />
 
-          {/* Input nativo oculto para disparar o seletor visual nativo com suporte completo */}
-          <input
-            ref={hiddenDateInputRef}
-            type={mode === 'month' ? 'month' : 'date'}
-            value={getNativePickerValue()}
-            onChange={handleNativePickerChange}
-            tabIndex={-1}
-            aria-hidden="true"
-            className="sr-only absolute pointer-events-none opacity-0"
-          />
+              {/* Input nativo sobreposto cobrindo toda a área clicável do ícone, permitindo toque direto e showPicker no mobile/desktop */}
+              <input
+                ref={hiddenDateInputRef}
+                type={mode === 'month' ? 'month' : 'date'}
+                value={getNativePickerValue()}
+                onChange={handleNativePickerChange}
+                onClick={handleNativePickerClick}
+                disabled={disabled}
+                tabIndex={-1}
+                aria-label={`Selecionar ${label || 'data'} no calendário`}
+                title="Abrir calendário"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+              />
+            </div>
+          </div>
         </div>
         {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
       </div>
