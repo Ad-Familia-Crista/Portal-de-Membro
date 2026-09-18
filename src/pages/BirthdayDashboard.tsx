@@ -15,21 +15,30 @@ import {
   RefreshCw,
   Users,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  AlertCircle
 } from 'lucide-react';
 
 interface BirthdayDashboardProps {
   members: Member[];
   loading: boolean;
+  error?: string | null;
   onRefresh: () => void;
 }
 
-export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, loading, onRefresh }) => {
+export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, loading, error, onRefresh }) => {
   const { user } = useAuth();
   const [monthFilter, setMonthFilter] = React.useState(new Date().getMonth());
   const [searchTerm, setSearchTerm] = React.useState('');
   const [onlyActive, setOnlyActive] = React.useState(true);
   const yearFilter = new Date().getFullYear();
+
+  // Auto-carregar membros ao montar a página se a lista ainda estiver vazia
+  React.useEffect(() => {
+    if (members.length === 0 && !loading) {
+      onRefresh();
+    }
+  }, []);
 
   const months = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -38,7 +47,8 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
 
   const parseDateToMonthDayYear = (dateStr: string | undefined | null) => {
     if (!dateStr) return null;
-    const str = dateStr.trim();
+    // Limpar espaços e remover hora/fuso se vier no padrão ISO (ex: 1990-05-15T00:00:00)
+    const str = dateStr.trim().split('T')[0];
     if (str.includes('-')) {
       const parts = str.split('-');
       if (parts.length === 3) {
@@ -64,12 +74,12 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
     return null;
   };
 
-  // Filtrar membros: se onlyActive, exige status ACTIVE; senão, inclui todos que têm data de nascimento
+  // Filtrar membros: se onlyActive, exige status ACTIVE/ATIVO; senão, inclui todos que têm data de nascimento
   const birthdaysInMonth = React.useMemo(() => {
     return members.filter(m => {
       if (!m.birthDate) return false;
-      // Filtro de status opcional
-      if (onlyActive && m.status && m.status.toUpperCase() !== 'ACTIVE') return false;
+      // Filtro de status opcional (aceita tanto ACTIVE quanto ATIVO)
+      if (onlyActive && m.status && !['ACTIVE', 'ATIVO'].includes(m.status.toUpperCase())) return false;
       
       const dateParsed = parseDateToMonthDayYear(m.birthDate);
       if (!dateParsed) return false;
@@ -93,7 +103,7 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
   const weddingsInMonth = React.useMemo(() => {
     return members.filter(m => {
       if (!m.marriageDate || !m.spouseName) return false;
-      if (onlyActive && m.status && m.status.toUpperCase() !== 'ACTIVE') return false;
+      if (onlyActive && m.status && !['ACTIVE', 'ATIVO'].includes(m.status.toUpperCase())) return false;
 
       const dateParsed = parseDateToMonthDayYear(m.marriageDate);
       if (!dateParsed) return false;
@@ -251,7 +261,18 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
         </div>
       </div>
 
-      {loading ? (
+      {error ? (
+        <div className="min-h-[200px] flex flex-col items-center justify-center gap-3 bg-rose-50 border border-rose-200 rounded-xl p-8 text-center">
+          <AlertCircle className="w-10 h-10 text-rose-500" />
+          <div>
+            <p className="text-rose-900 font-bold text-base">Falha ao carregar lista de membros</p>
+            <p className="text-rose-700 text-xs mt-1 max-w-md">{error}</p>
+          </div>
+          <Button onClick={onRefresh} variant="outline" className="mt-2 bg-white text-rose-700 border-rose-300 hover:bg-rose-100">
+            <RefreshCw className="w-4 h-4 mr-2" /> Tentar Novamente
+          </Button>
+        </div>
+      ) : loading ? (
         <div className="min-h-[250px] flex flex-col items-center justify-center gap-4">
           <Loader2 className="w-12 h-12 text-primary animate-spin" />
           <p className="text-sm font-bold text-primary">Carregando dados dos membros...</p>

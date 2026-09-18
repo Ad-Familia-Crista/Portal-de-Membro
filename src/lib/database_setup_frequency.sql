@@ -42,50 +42,34 @@ DROP POLICY IF EXISTS "Deleção exclusiva do Administrador" ON worship_frequenc
 -- Política de Leitura: ADMIN, SECRETARY e RECEPTION podem ver todos os registros
 CREATE POLICY "Leitura autorizada de frequências" 
 ON worship_frequency FOR SELECT 
+TO authenticated 
 USING (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('ADMIN', 'SECRETARY', 'RECEPTION')
-  )
+  public.get_auth_role() IN ('ADMIN', 'SECRETARY', 'RECEPTION')
 );
 
 -- Política de Inserção: ADMIN, SECRETARY e RECEPTION podem registrar
 CREATE POLICY "Inserção autorizada de frequências" 
 ON worship_frequency FOR INSERT
+TO authenticated 
 WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('ADMIN', 'SECRETARY', 'RECEPTION')
-  )
+  public.get_auth_role() IN ('ADMIN', 'SECRETARY', 'RECEPTION')
 );
 
 -- Política de Atualização: ADMIN, SECRETARY e RECEPTION podem editar
 CREATE POLICY "Atualização autorizada de frequências" 
 ON worship_frequency FOR UPDATE
+TO authenticated 
 USING (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('ADMIN', 'SECRETARY', 'RECEPTION')
-  )
+  public.get_auth_role() IN ('ADMIN', 'SECRETARY', 'RECEPTION')
 )
 WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('ADMIN', 'SECRETARY', 'RECEPTION')
-  )
+  public.get_auth_role() IN ('ADMIN', 'SECRETARY', 'RECEPTION')
 );
 
--- Política de Deleção: Apenas ADMIN pode deletar registros
-CREATE POLICY "Deleção exclusiva do Administrador" 
+-- Política de Deleção: ADMIN, SECRETARY e RECEPTION podem deletar registros de cultos
+CREATE POLICY "Deleção autorizada de frequências" 
 ON worship_frequency FOR DELETE 
+TO authenticated 
 USING (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role = 'ADMIN'
-  )
+  public.get_auth_role() IN ('ADMIN', 'SECRETARY', 'RECEPTION')
 );

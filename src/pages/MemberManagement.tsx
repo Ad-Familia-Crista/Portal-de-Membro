@@ -50,9 +50,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     date: new Date().toISOString().split('T')[0],
   });
   
-  // PAGINAÇÃO
+  // PAGINAÇÃO (10 registros por página conforme solicitado)
   const [currentPage, setCurrentPage] = React.useState(1);
-  const itemsPerPage = 20;
+  const itemsPerPage = 10;
 
   // Resetar página quando fizer busca
   React.useEffect(() => {

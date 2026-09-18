@@ -22,11 +22,16 @@ import {
 export const WorshipFrequencyPage: React.FC = () => {
   const { user } = useAuth();
   
-  // State da Lista com cache em memória
-  const [records, setRecords] = React.useState<WorshipFrequency[]>(() => {
-    return memoryCache.get<WorshipFrequency[]>('worship_frequency_list') || [];
-  });
-  const [loading, setLoading] = React.useState(() => !memoryCache.get('worship_frequency_list'));
+  // Constante de paginação (10 registros por página conforme solicitado)
+  const PAGE_SIZE = 10;
+
+  // State da Lista paginada com contagem total
+  const [records, setRecords] = React.useState<WorshipFrequency[]>([]);
+  const [totalCount, setTotalCount] = React.useState(0);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [loading, setLoading] = React.useState(true);
+  const [pageLoading, setPageLoading] = React.useState(false);
+  const hasLoadedOnce = React.useRef(false);
   
   // State do Formulário
   const [isEditing, setIsEditing] = React.useState(false);
@@ -42,36 +47,60 @@ export const WorshipFrequencyPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  // Buscar registros de forma otimizada
-  const fetchRecords = React.useCallback(async (force = false) => {
+  // Buscar registros de forma paginada de 10 em 10 (otimizado para Vercel)
+  const fetchRecords = React.useCallback(async (page: number = 1, force = false) => {
+    const cacheKey = `worship_frequency_page_${page}`;
     if (!force) {
-      const cached = memoryCache.get<WorshipFrequency[]>('worship_frequency_list');
+      const cached = memoryCache.get<{ records: WorshipFrequency[]; total: number }>(cacheKey);
       if (cached) {
-        setRecords(cached);
+        setRecords(cached.records);
+        setTotalCount(cached.total);
         setLoading(false);
+        setPageLoading(false);
+        hasLoadedOnce.current = true;
         return;
       }
     }
 
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('worship_frequency')
-      .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
-      .order('cult_date', { ascending: false });
-
-    if (error) {
-      console.error('Erro ao buscar frequências:', error);
+    if (!hasLoadedOnce.current) {
+      setLoading(true);
     } else {
-      const camel = toCamel(data) || [];
-      setRecords(camel);
-      memoryCache.set('worship_frequency_list', camel, 3 * 60 * 1000);
+      setPageLoading(true);
     }
-    setLoading(false);
+
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    try {
+      const { data, count, error } = await supabase
+        .from('worship_frequency')
+        .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
+        .order('cult_date', { ascending: false })
+        .range(from, to);
+
+      if (error) {
+        console.error('Erro ao buscar frequências:', error);
+        setErrorMsg('Erro ao carregar histórico de frequências.');
+      } else {
+        const camel = toCamel(data) || [];
+        const total = count ?? camel.length;
+        setRecords(camel);
+        setTotalCount(total);
+        memoryCache.set(cacheKey, { records: camel, total }, 2 * 60 * 1000);
+        hasLoadedOnce.current = true;
+      }
+    } catch (err: any) {
+      console.error('Exceção ao buscar frequências:', err);
+      setErrorMsg('Erro de conexão ao carregar frequências.');
+    } finally {
+      setLoading(false);
+      setPageLoading(false);
+    }
   }, []);
 
   React.useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    fetchRecords(currentPage);
+  }, [currentPage, fetchRecords]);
 
   // Calcular membros presentes reativamente (Fórmula: Total - (Visitantes + Crianças))
   const calculatedMembers = React.useMemo(() => {
@@ -131,9 +160,16 @@ export const WorshipFrequencyPage: React.FC = () => {
       alert('Erro ao excluir: ' + error.message);
     } else {
       memoryCache.invalidate('worship_frequency');
-      setRecords(records.filter(r => r.id !== id));
+      memoryCache.invalidate('worship_frequency_all');
       setSuccessMsg('Registro de frequência excluído com sucesso.');
       setTimeout(() => setSuccessMsg(null), 3000);
+
+      // Se for o único item da página e não estiver na primeira, volta uma página
+      if (records.length === 1 && currentPage > 1) {
+        setCurrentPage(prev => prev - 1);
+      } else {
+        fetchRecords(currentPage, true);
+      }
     }
   };
 
@@ -189,6 +225,11 @@ export const WorshipFrequencyPage: React.FC = () => {
         if (error) throw error;
         
         setSuccessMsg('Frequência atualizada com sucesso!');
+        // Invalidar caches compartilhados
+        memoryCache.invalidate('worship_frequency');
+        memoryCache.invalidate('worship_frequency_all');
+        handleCancel();
+        fetchRecords(currentPage, true);
       } else {
         // Criar novo
         const { error } = await supabase
@@ -198,14 +239,17 @@ export const WorshipFrequencyPage: React.FC = () => {
         if (error) throw error;
 
         setSuccessMsg('Frequência registrada com sucesso!');
+        // Invalidar caches compartilhados
+        memoryCache.invalidate('worship_frequency');
+        memoryCache.invalidate('worship_frequency_all');
+        handleCancel();
+        if (currentPage === 1) {
+          fetchRecords(1, true);
+        } else {
+          setCurrentPage(1);
+        }
       }
 
-      // Invalidar caches compartilhados (Dashboard e Lista)
-      memoryCache.invalidate('worship_frequency');
-
-      // Resetar formulário e recarregar
-      handleCancel();
-      fetchRecords(true);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       console.error('Erro ao salvar frequência:', err);
@@ -219,6 +263,9 @@ export const WorshipFrequencyPage: React.FC = () => {
       setSubmitting(false);
     }
   };
+
+  // Cálculo do total de páginas (10 registros por página)
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-8">
@@ -379,10 +426,15 @@ export const WorshipFrequencyPage: React.FC = () => {
             <Loader2 className="w-10 h-10 text-primary animate-spin" />
             <p className="text-sm font-bold text-primary">Buscando histórico...</p>
           </div>
-        ) : records.length === 0 ? (
+        ) : totalCount === 0 ? (
           <p className="py-8 text-center text-sm text-muted italic">Nenhuma frequência registrada até o momento.</p>
         ) : (
-          <div className="overflow-x-auto mt-4 rounded-xl border border-muted/10">
+          <div className="overflow-x-auto mt-4 rounded-xl border border-muted/10 relative">
+            {pageLoading && (
+              <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] flex items-center justify-center z-10 rounded-xl">
+                <Loader2 className="w-7 h-7 text-primary animate-spin" />
+              </div>
+            )}
             <table className="w-full text-left text-sm border-collapse">
               <thead>
                 <tr className="bg-background text-primary border-b border-muted/15 font-bold uppercase tracking-wider text-[10px]">
@@ -416,8 +468,8 @@ export const WorshipFrequencyPage: React.FC = () => {
                             <Edit3 className="w-4 h-4" />
                           </button>
                           
-                          {/* Excluir disponível de acordo com RLS (apenas Admin) */}
-                          {user?.role === 'ADMIN' && (
+                          {/* Excluir disponível para Admin, Secretária e Recepção */}
+                          {(user?.role === 'ADMIN' || user?.role === 'SECRETARY' || user?.role === 'RECEPTION') && (
                             <button 
                               onClick={() => handleDelete(r.id)}
                               className="p-2 text-muted hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
@@ -433,6 +485,36 @@ export const WorshipFrequencyPage: React.FC = () => {
                 })}
               </tbody>
             </table>
+
+            {/* CONTROLES DE PAGINAÇÃO (10 em 10) */}
+            {totalCount > PAGE_SIZE && (
+              <div className="p-4 border-t border-muted/10 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white">
+                <span className="text-xs text-muted font-medium">
+                  Mostrando {((currentPage - 1) * PAGE_SIZE) + 1} a {Math.min(currentPage * PAGE_SIZE, totalCount)} de {totalCount} registros
+                </span>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1 || pageLoading}
+                  >
+                    Anterior
+                  </Button>
+                  <div className="flex items-center px-3 text-sm font-bold text-primary bg-primary/5 rounded-md">
+                    Pág {currentPage} de {totalPages}
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages || pageLoading}
+                  >
+                    Próxima
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Card>

@@ -10,6 +10,7 @@ import { toCamel } from './lib/mapper';
 import { Member } from './types';
 import { PageSkeleton } from './components/Skeletons';
 import { memoryCache } from './lib/cache';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Lazy loading / Code splitting de páginas e componentes pesados
 const RegistrationForm = lazy(() => import('./pages/RegistrationForm').then(m => ({ default: m.RegistrationForm })));
@@ -44,6 +45,7 @@ const AppContent: React.FC = () => {
     return memoryCache.get<Member[]>('members_list') || [];
   });
   const [membersLoading, setMembersLoading] = React.useState(false);
+  const [membersError, setMembersError] = React.useState<string | null>(null);
   const [hasFetchedMembers, setHasFetchedMembers] = React.useState(() => !!memoryCache.get('members_list'));
 
   // Refs de controle de sincronismo para evitar loops de renderização
@@ -53,7 +55,7 @@ const AppContent: React.FC = () => {
     if (isFetchingRef.current) return;
     if (!force) {
       const cached = memoryCache.get<Member[]>('members_list');
-      if (cached) {
+      if (cached && cached.length > 1) {
         setMembers(cached);
         setHasFetchedMembers(true);
         return;
@@ -63,30 +65,46 @@ const AppContent: React.FC = () => {
 
     isFetchingRef.current = true;
     setMembersLoading(true);
+    setMembersError(null);
     try {
-      // Otimização: Seleção explícita de campos para listagem sem puxar blobs gigantes
-      const { data, error } = await supabase
-        .from('profiles')
-        .select(`
-          id, email, first_name, last_name, cpf, rg, birth_date, marriage_date, spouse_name, 
-          naturalness, nationality, marital_status, cep, address, number, neighborhood, city, state, 
-          cell, phones, education, profession, is_baptized, is_holy_spirit_baptized, entry_date, 
-          current_position, position_start_date, consecrated_to, consecration_date, departments, 
-          leader_department, role, status, photo_url, valid_until, last_updated, aceitou_politica, 
-          data_aceite, data_recusa, has_children, children, ministerial_history
-        `)
-        .order('first_name', { ascending: true });
+      let data: any = null;
+      let error: any = null;
+
+      if (user.role === 'RECEPTION') {
+        // SEGURANÇA TOTAL (LGPD): Recepção consulta estritamente a função de aniversariantes
+        // NÃO tem acesso direto à tabela profiles e NÃO recebe CPF, RG, endereço, e-mail, etc.
+        const res = await supabase.rpc('get_member_birthdays');
+        data = res.data;
+        error = res.error;
+      } else {
+        // ADMIN e SECRETARY consultam os dados cadastrais para gestão e dashboards
+        const res = await supabase
+          .from('profiles')
+          .select(`
+            id, email, first_name, last_name, cpf, rg, birth_date, marriage_date, spouse_name, 
+            naturalness, nationality, marital_status, cep, address, number, neighborhood, city, state, 
+            cell, phones, education, profession, is_baptized, is_holy_spirit_baptized, entry_date, 
+            current_position, position_start_date, consecrated_to, consecration_date, departments, 
+            leader_department, role, status, photo_url, valid_until, last_updated, aceitou_politica, 
+            data_aceite, data_recusa, has_children, children, ministerial_history
+          `)
+          .order('first_name', { ascending: true });
+        data = res.data;
+        error = res.error;
+      }
 
       if (error) {
         console.error('Erro ao carregar membros no cache global:', error);
+        setMembersError(error.message || 'Erro ao carregar lista de membros do banco de dados');
       } else {
         const camel = toCamel(data) || [];
         setMembers(camel);
         memoryCache.set('members_list', camel, 4 * 60 * 1000); // 4 minutos de cache
         setHasFetchedMembers(true);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Exceção ao carregar membros no cache global:', err);
+      setMembersError(err?.message || 'Exceção ao carregar membros');
     } finally {
       isFetchingRef.current = false;
       setMembersLoading(false);
@@ -97,10 +115,12 @@ const AppContent: React.FC = () => {
   React.useEffect(() => {
     if (user && (user.role === 'ADMIN' || user.role === 'SECRETARY' || user.role === 'RECEPTION')) {
       if (['dashboard', 'members', 'birthday-dashboard'].includes(currentPage)) {
-        fetchMembersGlobal();
+        // Se tiver 1 ou menos membros, força a busca real no banco (evita cache incompleto de quando estava sem permissão)
+        const shouldForce = members.length <= 1;
+        fetchMembersGlobal(shouldForce);
       }
     }
-  }, [currentPage, user, fetchMembersGlobal]);
+  }, [currentPage, user, fetchMembersGlobal, members.length]);
 
   if (isLoading) {
     return (
@@ -132,6 +152,9 @@ const AppContent: React.FC = () => {
           </Suspense>
         );
       case 'dashboard':
+        if (user.role !== 'ADMIN' && user.role !== 'SECRETARY') {
+          return <HomePage onNavigate={setCurrentPage} />;
+        }
         return (
           <Suspense fallback={<PageSkeleton />}>
             <AdminDashboard 
@@ -145,6 +168,9 @@ const AppContent: React.FC = () => {
           </Suspense>
         );
       case 'members':
+        if (user.role !== 'ADMIN' && user.role !== 'SECRETARY') {
+          return <HomePage onNavigate={setCurrentPage} />;
+        }
         return (
           <Suspense fallback={<PageSkeleton />}>
             <MemberManagement 
@@ -162,6 +188,9 @@ const AppContent: React.FC = () => {
           </Suspense>
         );
       case 'access':
+        if (user.role !== 'ADMIN') {
+          return <HomePage onNavigate={setCurrentPage} />;
+        }
         return (
           <Suspense fallback={<PageSkeleton />}>
             <AccessManagement />
@@ -191,6 +220,7 @@ const AppContent: React.FC = () => {
             <BirthdayDashboard 
               members={members} 
               loading={membersLoading} 
+              error={membersError}
               onRefresh={() => {
                 memoryCache.invalidate('members_list');
                 fetchMembersGlobal(true);
@@ -233,7 +263,9 @@ const AppContent: React.FC = () => {
       )}
 
       <main className="flex-1 py-8">
-        {renderPage()}
+        <ErrorBoundary>
+          {renderPage()}
+        </ErrorBoundary>
       </main>
 
       <footer className="py-8 border-t border-[#E5E1DA] bg-white/70">
