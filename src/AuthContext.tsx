@@ -11,6 +11,8 @@ interface AuthContextType {
   logout: () => void;
   updateUser: (data: Partial<Member>) => Promise<void>;
   isLoading: boolean;
+  isPasswordRecovery: boolean;
+  clearPasswordRecovery: () => Promise<void>;
 }
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
@@ -90,6 +92,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
   const [isLoading, setIsLoading] = React.useState(() => !localStorage.getItem('auth_user'));
+  const [isPasswordRecovery, setIsPasswordRecovery] = React.useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      return window.location.hash.includes('type=recovery') ||
+        new URLSearchParams(window.location.search).get('type') === 'recovery';
+    } catch {
+      return false;
+    }
+  });
+  const isPasswordRecoveryRef = React.useRef(isPasswordRecovery);
+
+  React.useEffect(() => {
+    isPasswordRecoveryRef.current = isPasswordRecovery;
+  }, [isPasswordRecovery]);
+
+  const clearPasswordRecovery = React.useCallback(async () => {
+    isPasswordRecoveryRef.current = false;
+    setIsPasswordRecovery(false);
+    setUser(null);
+    try {
+      localStorage.removeItem('auth_user');
+      if (typeof window !== 'undefined' && window.location.hash) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+      await supabase.auth.signOut().catch(err => {
+        console.warn('Erro ao encerrar sessão de recuperação:', err);
+      });
+    } catch (err) {
+      console.error('Erro ao limpar fluxo de recuperação:', err);
+    }
+  }, []);
 
   // In-flight promise tracker to deduplicate concurrent fetch requests for the same profile
   const fetchingProfileIdRef = React.useRef<string | null>(null);
@@ -151,6 +184,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Single source of truth: onAuthStateChange handles initial session and all auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
+        if (event === 'PASSWORD_RECOVERY') {
+          isPasswordRecoveryRef.current = true;
+          if (isMounted) {
+            setIsPasswordRecovery(true);
+            setUser(null);
+          }
+          return;
+        }
+
+        // Se estiver em fluxo de recuperação de senha, não tratar eventos subsequentes como login de usuário normal
+        if (isPasswordRecoveryRef.current) {
+          return;
+        }
+
         if (session?.user) {
           const profile = await fetchProfile(session.user.id);
           if (isMounted) {
@@ -308,7 +355,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 
   return (
-    <AuthContext.Provider value={{ user, role: user?.role || null, login, register, logout, updateUser, isLoading }}>
+    <AuthContext.Provider value={{
+      user,
+      role: user?.role || null,
+      login,
+      register,
+      logout,
+      updateUser,
+      isLoading,
+      isPasswordRecovery,
+      clearPasswordRecovery
+    }}>
       {children}
     </AuthContext.Provider>
   );

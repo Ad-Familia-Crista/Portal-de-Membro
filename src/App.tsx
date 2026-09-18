@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import { LoginPage } from './pages/LoginPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { HomePage } from './pages/HomePage';
 import { Button } from './components/Button';
 import { ChevronLeft } from 'lucide-react';
@@ -22,7 +23,7 @@ const DigitalIDCard = lazy(() => import('./components/DigitalIDCard').then(m => 
 const PrivacyConsent = lazy(() => import('./components/PrivacyConsent').then(m => ({ default: m.PrivacyConsent })));
 
 const AppContent: React.FC = () => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isPasswordRecovery } = useAuth();
   const [currentPage, setCurrentPageState] = React.useState<string>(() => {
     try {
       // Só restaura a página se o usuário não estiver sendo enviado para cá por logout/redirect
@@ -107,6 +108,10 @@ const AppContent: React.FC = () => {
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
       </div>
     );
+  }
+
+  if (isPasswordRecovery) {
+    return <ResetPasswordPage />;
   }
 
   if (!user) {
