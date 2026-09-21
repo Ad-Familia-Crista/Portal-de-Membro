@@ -219,6 +219,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const [tempImageSrc, setTempImageSrc] = React.useState<string | null>(null);
   const [showConventionTooltip, setShowConventionTooltip] = React.useState(false);
   
+  // Trava síncrona imediata contra cliques repetidos / duplo clique
+  const isSubmittingRef = React.useRef(false);
+  // Controle para inicializar o formulário apenas uma vez na carga do perfil
+  const hasInitializedRef = React.useRef(false);
+
   // Cache em memória para verificações de CPF instantâneas sem bater repetidamente no banco
   const verifiedCpfsCacheRef = React.useRef<Map<string, string | null>>(new Map());
 
@@ -277,9 +282,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
   });
 
-  // Sincronizar os valores do formulário imediatamente quando o perfil do usuário carregar ou atualizar
+  // Sincronizar os valores iniciais do formulário quando o perfil do usuário carregar
+  // NUNCA sobrescrever o formulário se um salvamento estiver em andamento ou se já foi inicializado
   React.useEffect(() => {
-    if (user) {
+    if (isSubmittingRef.current) return;
+    if (user && !hasInitializedRef.current) {
+      hasInitializedRef.current = true;
       reset({
         ...user,
         firstName: user.firstName || '',
@@ -491,8 +499,19 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   };
 
   const onSubmit = async (data: any) => {
+    // 1. Trava síncrona imediata contra cliques repetidos / duplo clique
+    if (isSubmittingRef.current) {
+      console.warn('[CADASTRO] Clique duplo ou submit concorrente bloqueado com sucesso.');
+      return;
+    }
+    isSubmittingRef.current = true;
     setIsSubmittingForm(true);
+
+    const tStart = performance.now();
+    console.log('[CADASTRO] Início do processo de salvamento');
+
     try {
+      // 2. Formatação dos dados para o schema da tabela profiles
       const formattedData = {
         ...data,
         hasChildren: data.hasChildren === 'Sim',
@@ -502,19 +521,52 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         children: data.children?.map((c: any) => ({ ...c, congregates: c.congregates || 'Sim' })) || [],
         phones: data.phones?.map((p: any) => p.number).filter(Boolean) || [],
       };
+
+      const tPrepared = performance.now();
+      console.log(`[CADASTRO] Payload preparado em ${(tPrepared - tStart).toFixed(1)} ms`);
+
+      // 3. Medição de tamanho do payload (estimativa segura sem expor dados)
+      try {
+        const jsonStr = JSON.stringify(formattedData);
+        const totalKb = (new Blob([jsonStr]).size / 1024).toFixed(1);
+        const photoKb = formattedData.photoUrl 
+          ? (new Blob([formattedData.photoUrl]).size / 1024).toFixed(1) 
+          : '0';
+        console.log(`[CADASTRO] Tamanho aproximado do payload: ${totalKb} KB`);
+        console.log(`[CADASTRO] photo_url: ${photoKb !== '0' ? `${photoKb} KB` : 'Sem foto anexada'}`);
+      } catch (err) {
+        console.warn('[CADASTRO] Não foi possível calcular o tamanho do payload:', err);
+      }
+
+      // 4. Execução do UPDATE no Supabase
+      console.log('[CADASTRO] Antes do update Supabase');
+      const tSupabaseStart = performance.now();
       await updateUser(formattedData);
+      const tSupabaseEnd = performance.now();
+      console.log(`[CADASTRO] Supabase respondeu com sucesso: ${(tSupabaseEnd - tSupabaseStart).toFixed(1)} ms`);
+
+      // 5. Confirmação real do banco obtida com sucesso:
       showToast('Cadastro atualizado com sucesso!', 'success');
-      // Limpar etapa salva e retornar para o início do Portal
       try { localStorage.removeItem('portal_registration_step'); } catch {}
+
+      const tTotal = performance.now();
+      console.log(`[CADASTRO] Finalização - Tempo total do salvamento: ${(tTotal - tStart).toFixed(1)} ms`);
+
       if (onComplete) {
         onComplete();
       } else {
         setStep(1);
       }
     } catch (error: any) {
-      console.error('Erro ao salvar cadastro:', error);
-      showToast(error.message || 'Erro ao salvar. Verifique sua conexão.', 'error');
+      const tError = performance.now();
+      console.error(`[CADASTRO] Erro detalhado ao salvar cadastro (${(tError - tStart).toFixed(1)} ms):`, error);
+      showToast(
+        'Não foi possível salvar seu cadastro. Seus dados continuam preenchidos. Verifique sua conexão e tente novamente.',
+        'error'
+      );
+      // REGRA CRÍTICA: Não chamamos reset(), não chamamos onComplete(), mantendo os dados no formulário
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmittingForm(false);
     }
   };

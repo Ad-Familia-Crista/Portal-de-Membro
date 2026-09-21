@@ -325,13 +325,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       validUntil: validUntilDate.toISOString().split('T')[0]
     };
 
-    // 1) Atualização otimista imediata — UI responde instantaneamente
-    setUser(updatedUser);
-    try {
-      localStorage.setItem('auth_user', JSON.stringify(updatedUser));
-    } catch {}
-
-    // 2) Persiste no Supabase
+    // 1) Persiste no Supabase PRIMEIRO (sem atualização otimista prematura)
     const snakeData = toSnake({
       ...data,
       lastUpdated: updatedUser.lastUpdated,
@@ -342,15 +336,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     delete snakeData.id;
     delete snakeData.email;
 
-    const { error } = await supabase
+    const { data: updatedProfile, error } = await supabase
       .from('profiles')
       .update(snakeData)
-      .eq('id', user.id);
+      .eq('id', user.id)
+      .select()
+      .single();
 
     if (error) {
-      console.error('Erro ao sincronizar perfil no Supabase:', error);
+      console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', error);
       throw error;
     }
+
+    if (!updatedProfile) {
+      const notFoundError = new Error('Nenhum registro foi atualizado no banco de dados.');
+      console.error('[CADASTRO]', notFoundError);
+      throw notFoundError;
+    }
+
+    // 2) SOMENTE após a confirmação real do banco de dados:
+    const camelUpdated = toCamel(updatedProfile) as Member;
+    const finalUser: Member = {
+      ...user,
+      ...camelUpdated,
+      validUntil: updatedUser.validUntil,
+      lastUpdated: updatedUser.lastUpdated
+    };
+
+    setUser(finalUser);
+    try {
+      localStorage.setItem('auth_user', JSON.stringify(finalUser));
+    } catch {}
+
+    return finalUser;
   };
 
 
