@@ -50,7 +50,7 @@ export const LoginPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-        redirectTo: `${window.location.origin}`
+        redirectTo: `${window.location.origin}/?type=recovery`
       });
 
       if (error) throw error;
