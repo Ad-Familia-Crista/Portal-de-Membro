@@ -91,7 +91,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null;
     }
   });
-  const [isLoading, setIsLoading] = React.useState(() => !localStorage.getItem('auth_user'));
+  const [isLoading, setIsLoading] = React.useState(() => {
+    try {
+      // Se a URL indica recuperação de senha, SEMPRE aguardar a resolução real do Supabase.
+      // O query param ?type=recovery persiste mesmo após o SDK limpar o hash da URL.
+      // Isso impede que LoginPage apareça antes que PASSWORD_RECOVERY seja processado.
+      const isRecoveryUrl =
+        new URLSearchParams(window.location.search).get('type') === 'recovery' ||
+        window.location.hash.includes('type=recovery');
+      if (isRecoveryUrl) return true;
+    } catch {}
+    // Fluxo normal: usa o cache do localStorage para evitar flash do spinner
+    return !localStorage.getItem('auth_user');
+  });
   const [isPasswordRecovery, setIsPasswordRecovery] = React.useState<boolean>(() => {
     try {
       if (typeof window === 'undefined') return false;
@@ -180,8 +192,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   React.useEffect(() => {
     let isMounted = true;
+    let initialAuthResolved = false;
 
-    // Single source of truth: onAuthStateChange handles initial session and all auth events
+    // Detecta se a URL sinaliza recuperação de senha.
+    // O query param ?type=recovery persiste mesmo após o SDK do Supabase limpar o hash.
+    const urlIndicatesRecovery = (() => {
+      try {
+        return (
+          new URLSearchParams(window.location.search).get('type') === 'recovery' ||
+          window.location.hash.includes('type=recovery')
+        );
+      } catch {
+        return false;
+      }
+    })();
+
+    // Libera o isLoading apenas uma vez — evita condições de corrida entre eventos.
+    const finishLoading = () => {
+      if (!initialAuthResolved) {
+        initialAuthResolved = true;
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    // Fonte única de verdade: onAuthStateChange processa a sessão inicial e todos os eventos
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
         if (event === 'PASSWORD_RECOVERY') {
@@ -190,12 +224,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsPasswordRecovery(true);
             setUser(null);
           }
+          finishLoading();
           return;
         }
 
-        // Se estiver em fluxo de recuperação de senha, não tratar eventos subsequentes como login de usuário normal
+        // Se já estamos em fluxo de recuperação, ignorar eventos subsequentes (ex: SIGNED_IN)
+        // para não redirecionar ao portal nem sobrescrever isPasswordRecovery
         if (isPasswordRecoveryRef.current) {
+          finishLoading();
           return;
+        }
+
+        // Se a URL indica recuperação mas ainda não chegou o evento PASSWORD_RECOVERY
+        // (ex: INITIAL_SESSION com sessão nula chegou antes), aguardar sem liberar o loading.
+        // Isso evita que LoginPage apareça durante a janela de inicialização da sessão de recuperação.
+        if (urlIndicatesRecovery && !session && !initialAuthResolved) {
+          return; // Não chama finishLoading() — aguarda PASSWORD_RECOVERY
         }
 
         if (session?.user) {
@@ -204,7 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (profile) {
               setUser(profile);
             } else {
-              // Fallback minimal user profile if row is not created yet
+              // Fallback: perfil mínimo caso o registro ainda não exista no banco
               setUser(prev => prev || ({
                 id: session.user.id,
                 email: session.user.email || '',
@@ -217,16 +261,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           if (isMounted) setUser(null);
         }
+
+        finishLoading();
       } catch (error) {
         console.error('Erro ao processar estado de autenticação:', error);
-      } finally {
-        if (isMounted) setIsLoading(false);
+        finishLoading(); // Sempre libera em caso de erro para não travar a UI
       }
     });
+
+    // Timeout de segurança para o fluxo de recuperação:
+    // Se PASSWORD_RECOVERY não chegar em 8 segundos (token expirado, inválido, etc.),
+    // libera o loading para que o usuário veja a LoginPage e possa solicitar novo link.
+    let recoveryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (urlIndicatesRecovery) {
+      recoveryTimeoutId = setTimeout(() => {
+        if (isMounted && !initialAuthResolved) {
+          console.warn('[AUTH] Timeout aguardando PASSWORD_RECOVERY. Liberando carregamento.');
+          finishLoading();
+        }
+      }, 8000);
+    }
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      if (recoveryTimeoutId) clearTimeout(recoveryTimeoutId);
     };
   }, [fetchProfile]);
 
