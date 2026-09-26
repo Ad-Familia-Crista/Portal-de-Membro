@@ -82,9 +82,34 @@ const MOCK_MEMBER: Member = {
   ],
 };
 
+// Chave exclusiva para armazenar temporariamente a intenção de recuperação de senha
+const RECOVERY_STORAGE_KEY = 'is_password_recovery';
+
+// Detecta se a URL contém intenção de recuperação de senha antes que o SDK possa limpar o hash
+const detectRecoveryIntent = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false;
+    const hashHasRecovery = window.location.hash.includes('type=recovery');
+    const searchHasRecovery = new URLSearchParams(window.location.search).get('type') === 'recovery';
+
+    if (hashHasRecovery || searchHasRecovery) {
+      sessionStorage.setItem(RECOVERY_STORAGE_KEY, 'true');
+      return true;
+    }
+    return sessionStorage.getItem(RECOVERY_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+// Execução imediata no carregamento do módulo para capturar o hash antes de qualquer operação assíncrona do SDK
+detectRecoveryIntent();
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = React.useState<Member | null>(() => {
     try {
+      // Se a sessão inicial for para recuperação de senha, nunca restaura dados de membro
+      if (detectRecoveryIntent()) return null;
       const cached = localStorage.getItem('auth_user');
       return cached ? JSON.parse(cached) : null;
     } catch {
@@ -93,25 +118,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [isLoading, setIsLoading] = React.useState(() => {
     try {
-      // Se a URL indica recuperação de senha, SEMPRE aguardar a resolução real do Supabase.
-      // O query param ?type=recovery persiste mesmo após o SDK limpar o hash da URL.
-      // Isso impede que LoginPage apareça antes que PASSWORD_RECOVERY seja processado.
-      const isRecoveryUrl =
-        new URLSearchParams(window.location.search).get('type') === 'recovery' ||
-        window.location.hash.includes('type=recovery');
-      if (isRecoveryUrl) return true;
+      // Se a URL ou sessionStorage indica recuperação, SEMPRE aguardar a resolução do Supabase
+      if (detectRecoveryIntent()) return true;
     } catch {}
     // Fluxo normal: usa o cache do localStorage para evitar flash do spinner
     return !localStorage.getItem('auth_user');
   });
   const [isPasswordRecovery, setIsPasswordRecovery] = React.useState<boolean>(() => {
-    try {
-      if (typeof window === 'undefined') return false;
-      return window.location.hash.includes('type=recovery') ||
-        new URLSearchParams(window.location.search).get('type') === 'recovery';
-    } catch {
-      return false;
-    }
+    return detectRecoveryIntent();
   });
   const isPasswordRecoveryRef = React.useRef(isPasswordRecovery);
 
@@ -124,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsPasswordRecovery(false);
     setUser(null);
     try {
+      sessionStorage.removeItem(RECOVERY_STORAGE_KEY);
       localStorage.removeItem('auth_user');
       if (typeof window !== 'undefined' && window.location.hash) {
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -194,18 +209,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let isMounted = true;
     let initialAuthResolved = false;
 
-    // Detecta se a URL sinaliza recuperação de senha.
-    // O query param ?type=recovery persiste mesmo após o SDK do Supabase limpar o hash.
-    const urlIndicatesRecovery = (() => {
-      try {
-        return (
-          new URLSearchParams(window.location.search).get('type') === 'recovery' ||
-          window.location.hash.includes('type=recovery')
-        );
-      } catch {
-        return false;
-      }
-    })();
+    // Detecta se a URL ou o sessionStorage sinalizam recuperação de senha
+    const urlIndicatesRecovery = detectRecoveryIntent();
 
     // Libera o isLoading apenas uma vez — evita condições de corrida entre eventos.
     const finishLoading = () => {
@@ -218,7 +223,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Fonte única de verdade: onAuthStateChange processa a sessão inicial e todos os eventos
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (event === 'PASSWORD_RECOVERY') {
+        const isRecoveryActive =
+          event === 'PASSWORD_RECOVERY' ||
+          isPasswordRecoveryRef.current ||
+          detectRecoveryIntent();
+
+        // Se estamos em fluxo de recuperação, NUNCA tratar INITIAL_SESSION, SIGNED_IN
+        // ou qualquer evento como login de membro normal.
+        if (isRecoveryActive) {
+          try { sessionStorage.setItem(RECOVERY_STORAGE_KEY, 'true'); } catch {}
           isPasswordRecoveryRef.current = true;
           if (isMounted) {
             setIsPasswordRecovery(true);
@@ -226,20 +239,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           finishLoading();
           return;
-        }
-
-        // Se já estamos em fluxo de recuperação, ignorar eventos subsequentes (ex: SIGNED_IN)
-        // para não redirecionar ao portal nem sobrescrever isPasswordRecovery
-        if (isPasswordRecoveryRef.current) {
-          finishLoading();
-          return;
-        }
-
-        // Se a URL indica recuperação mas ainda não chegou o evento PASSWORD_RECOVERY
-        // (ex: INITIAL_SESSION com sessão nula chegou antes), aguardar sem liberar o loading.
-        // Isso evita que LoginPage apareça durante a janela de inicialização da sessão de recuperação.
-        if (urlIndicatesRecovery && !session && !initialAuthResolved) {
-          return; // Não chama finishLoading() — aguarda PASSWORD_RECOVERY
         }
 
         if (session?.user) {
@@ -270,13 +269,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Timeout de segurança para o fluxo de recuperação:
-    // Se PASSWORD_RECOVERY não chegar em 8 segundos (token expirado, inválido, etc.),
+    // Se a recuperação não for resolvida em 8 segundos (token expirado, inválido, etc.),
     // libera o loading para que o usuário veja a LoginPage e possa solicitar novo link.
     let recoveryTimeoutId: ReturnType<typeof setTimeout> | null = null;
     if (urlIndicatesRecovery) {
       recoveryTimeoutId = setTimeout(() => {
         if (isMounted && !initialAuthResolved) {
-          console.warn('[AUTH] Timeout aguardando PASSWORD_RECOVERY. Liberando carregamento.');
+          console.warn('[AUTH] Timeout aguardando fluxo de recuperação. Liberando carregamento.');
+          try { sessionStorage.removeItem(RECOVERY_STORAGE_KEY); } catch {}
+          isPasswordRecoveryRef.current = false;
+          setIsPasswordRecovery(false);
           finishLoading();
         }
       }, 8000);
