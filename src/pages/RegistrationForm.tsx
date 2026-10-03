@@ -10,7 +10,7 @@ import { DatePickerInput } from '../components/DatePickerInput';
 import { DEPARTMENTS, CONSECRATIONS, POSITIONS, CHILD_DEPARTMENTS, BRAZILIAN_STATES, ALL_COUNTRIES } from '../types';
 import { motion } from 'motion/react';
 import { maskCPF, maskRG, maskCEP, maskPhone, maskDate, maskMonthYear, maskYear, isValidCPF, cn } from '../utils';
-import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loader2, HelpCircle, Lock } from 'lucide-react';
+import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loader2, HelpCircle, Lock, CheckCircle2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 import { ImageCropperModal } from '../components/ImageCropperModal';
@@ -215,6 +215,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const [isSubmittingForm, setIsSubmittingForm] = React.useState(false);
   const [isValidatingStep, setIsValidatingStep] = React.useState(false);
   const [childCpfDbErrors, setChildCpfDbErrors] = React.useState<Record<number, string>>({});
+  const [childCpfValidating, setChildCpfValidating] = React.useState<Record<number, boolean>>({});
+  const childCpfTimersRef = React.useRef<Record<number, any>>({});
   const [cropperOpen, setCropperOpen] = React.useState(false);
   const [tempImageSrc, setTempImageSrc] = React.useState<string | null>(null);
   const [showConventionTooltip, setShowConventionTooltip] = React.useState(false);
@@ -372,14 +374,19 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
   }, [hasChildren, setValue, step]);
 
-  // Consulta otimizada de existência de CPF de filho com cache em memória
+  // Consulta ultra-otimizada de existência de CPF de filho com cache em memória e validação instantânea
   const validateChildCpfInDatabase = async (cpf: string, childIndex: number): Promise<string | null> => {
     const clean = (cpf || '').replace(/\D/g, '');
     if (clean.length !== 11) {
       return 'CPF incompleto (11 dígitos)';
     }
 
-    // 1. Verificar duplicidade no próprio formulário
+    // 0. Validação matemática oficial em 0ms (evita requisições ao banco se os dígitos forem inválidos)
+    if (!isValidCPF(clean)) {
+      return 'CPF inválido';
+    }
+
+    // 1. Verificar duplicidade no próprio formulário em 0ms
     const currentChildren = watchChildren || [];
     for (let i = 0; i < currentChildren.length; i++) {
       if (i !== childIndex && (currentChildren[i]?.cpf || '').replace(/\D/g, '') === clean) {
@@ -387,14 +394,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       }
     }
 
-    // 2. Verificar no cache local em memória (resposta imediata)
+    // 2. Verificar no cache local em memória (resposta imediata em 0ms)
     if (verifiedCpfsCacheRef.current.has(clean)) {
       return verifiedCpfsCacheRef.current.get(clean) || null;
     }
 
-    // 3. Consultar banco de dados Supabase via RPC PostgreSQL (execução 100% no banco sem trafegar dados)
+    // 3. Consultar banco de dados Supabase via RPC PostgreSQL ultra-rápida (índice B-Tree e GIN)
     try {
-      // Tentar via função RPC ultra-eficiente no PostgreSQL
       const { data: existsRpc, error: rpcError } = await supabase.rpc('check_child_cpf_exists', {
         check_cpf: clean,
         exclude_user_id: user?.id || null
@@ -410,24 +416,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         }
       }
 
-      // Fallback seguro caso a migration ainda não tenha sido executada no painel Supabase
+      // Fallback caso a função RPC não esteja criada no banco (verifica apenas na lista children)
       const formattedCpf = maskCPF(clean);
 
-      // Verificar se já existe como membro na tabela profiles
-      const { data: memberMatches, error: memberError } = await supabase
-        .from('profiles')
-        .select('id')
-        .or(`cpf.eq.${formattedCpf},cpf.eq.${clean}`)
-        .limit(1);
-
-      if (!memberError && memberMatches && memberMatches.length > 0) {
-        if (!user || memberMatches[0].id !== user.id) {
-          verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
-          return 'CPF já cadastrado';
-        }
-      }
-
-      // Consulta direcionada por índice no JSONB sem baixar todos os perfis
       const { data: childMatches, error: childError } = await supabase
         .from('profiles')
         .select('id')
@@ -451,7 +442,33 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
   const handleChildCpfBlur = async (cpf: string, index: number) => {
     if (!cpf) return;
+    const clean = cpf.replace(/\D/g, '');
+    if (clean.length < 11) {
+      if (clean.length > 0) {
+        setChildCpfDbErrors(prev => ({ ...prev, [index]: 'CPF incompleto (11 dígitos)' }));
+      }
+      return;
+    }
+
+    if (childCpfTimersRef.current[index]) {
+      clearTimeout(childCpfTimersRef.current[index]);
+    }
+
+    // Se já estiver no cache, exibe imediatamente
+    if (verifiedCpfsCacheRef.current.has(clean)) {
+      const cached = verifiedCpfsCacheRef.current.get(clean);
+      setChildCpfDbErrors(prev => {
+        const next = { ...prev };
+        if (cached) next[index] = cached;
+        else delete next[index];
+        return next;
+      });
+      return;
+    }
+
+    setChildCpfValidating(prev => ({ ...prev, [index]: true }));
     const errorMsg = await validateChildCpfInDatabase(cpf, index);
+    setChildCpfValidating(prev => ({ ...prev, [index]: false }));
     setChildCpfDbErrors(prev => {
       const next = { ...prev };
       if (errorMsg) {
@@ -909,8 +926,16 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             <button 
                               type="button" 
                               onClick={() => {
+                                if (childCpfTimersRef.current[index]) {
+                                  clearTimeout(childCpfTimersRef.current[index]);
+                                }
                                 removeChild(index);
                                 setChildCpfDbErrors(prev => {
+                                  const next = { ...prev };
+                                  delete next[index];
+                                  return next;
+                                });
+                                setChildCpfValidating(prev => {
                                   const next = { ...prev };
                                   delete next[index];
                                   return next;
@@ -934,28 +959,64 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             <Controller
                               name={`children.${index}.cpf`}
                               control={control}
-                              render={({ field: cpfField }) => (
-                                <Input
-                                  label="CPF *"
-                                  {...cpfField}
-                                  onChange={(e) => {
-                                    cpfField.onChange(maskCPF(e.target.value));
-                                    if (childCpfDbErrors[index]) {
-                                      setChildCpfDbErrors(prev => {
-                                        const next = { ...prev };
-                                        delete next[index];
-                                        return next;
-                                      });
+                              render={({ field: cpfField }) => {
+                                const isValidating = Boolean(childCpfValidating[index]);
+                                const cleanDigits = (cpfField.value || '').replace(/\D/g, '');
+                                const is11Digits = cleanDigits.length === 11;
+                                const isVerifiedSuccess = is11Digits && !childCpfError && !isValidating && verifiedCpfsCacheRef.current.get(cleanDigits) === null;
+
+                                return (
+                                  <Input
+                                    label="CPF *"
+                                    {...cpfField}
+                                    onChange={(e) => {
+                                      const val = maskCPF(e.target.value);
+                                      cpfField.onChange(val);
+                                      const clean = val.replace(/\D/g, '');
+
+                                      if (childCpfDbErrors[index]) {
+                                        setChildCpfDbErrors(prev => {
+                                          const next = { ...prev };
+                                          delete next[index];
+                                          return next;
+                                        });
+                                      }
+
+                                      if (childCpfTimersRef.current[index]) {
+                                        clearTimeout(childCpfTimersRef.current[index]);
+                                      }
+
+                                      // Quando atinge os 11 dígitos, inicia validação antecipada em background (debounce 250ms)
+                                      if (clean.length === 11) {
+                                        childCpfTimersRef.current[index] = setTimeout(async () => {
+                                          setChildCpfValidating(prev => ({ ...prev, [index]: true }));
+                                          const errorMsg = await validateChildCpfInDatabase(val, index);
+                                          setChildCpfValidating(prev => ({ ...prev, [index]: false }));
+                                          setChildCpfDbErrors(prev => {
+                                            const next = { ...prev };
+                                            if (errorMsg) next[index] = errorMsg;
+                                            else delete next[index];
+                                            return next;
+                                          });
+                                        }, 250);
+                                      }
+                                    }}
+                                    onBlur={(e) => {
+                                      cpfField.onBlur();
+                                      handleChildCpfBlur(e.target.value, index);
+                                    }}
+                                    placeholder="000.000.000-00"
+                                    error={childCpfError}
+                                    rightIcon={
+                                      isValidating ? (
+                                        <Loader2 className="w-4 h-4 text-muted animate-spin" />
+                                      ) : isVerifiedSuccess ? (
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                      ) : undefined
                                     }
-                                  }}
-                                  onBlur={(e) => {
-                                    cpfField.onBlur();
-                                    handleChildCpfBlur(e.target.value, index);
-                                  }}
-                                  placeholder="000.000.000-00"
-                                  error={childCpfError}
-                                />
-                              )}
+                                  />
+                                );
+                              }}
                             />
 
                             <Controller

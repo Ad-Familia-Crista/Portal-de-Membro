@@ -50,18 +50,7 @@ BEGIN
                    substring(clean_cpf from 7 for 3) || '-' ||
                    substring(clean_cpf from 10 for 2);
 
-  -- 1. Verifica se já existe na coluna cpf de profiles
-  SELECT EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE (regexp_replace(cpf, '\D', '', 'g') = clean_cpf OR cpf = formatted_cpf)
-    AND (exclude_user_id IS NULL OR id <> exclude_user_id)
-  ) INTO cpf_exists;
-
-  IF cpf_exists THEN
-    RETURN true;
-  END IF;
-
-  -- 2. Verifica se já existe dentro do array jsonb children de outros perfis
+  -- Verifica se já existe dentro do array jsonb children de outros membros
   SELECT EXISTS (
     SELECT 1 
     FROM profiles p,
