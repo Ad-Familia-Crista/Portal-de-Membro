@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS worship_frequency (
     'Culto de Santa Ceia', 
     'Culto da Família', 
     'Culto Minha Família no Altar do Senhor',
-    'Culto da Vitória'
+    'Culto da Vitória',
+    'Culto The Search',
+    'Culto Circulo de Oração'
   )),
   total_attendance INTEGER NOT NULL CHECK (total_attendance >= 0),
   visitors_attendance INTEGER NOT NULL CHECK (visitors_attendance >= 0),

@@ -1,9 +1,22 @@
 export type UserRole = 'MEMBER' | 'RECEPTION' | 'SECRETARY' | 'ADMIN';
 
+export const CULT_THEMES = [
+  'Culto de Primícias',
+  'Culto de Missões',
+  'Culto de Santa Ceia',
+  'Culto da Família',
+  'Culto Minha Família no Altar do Senhor',
+  'Culto da Vitória',
+  'Culto The Search',
+  'Culto Circulo de Oração'
+] as const;
+
+export type CultTheme = typeof CULT_THEMES[number];
+
 export interface WorshipFrequency {
   id: string;
   cultDate: string; // Formato YYYY-MM-DD
-  theme: 'Culto de Primícias' | 'Culto de Missões' | 'Culto de Santa Ceia' | 'Culto da Família' | 'Culto Minha Família no Altar do Senhor' | 'Culto da Vitória';
+  theme: CultTheme;
   speaker?: string; // Preleitor que ministrou no culto
   totalAttendance: number;
   visitorsAttendance: number;
@@ -24,15 +37,6 @@ export interface Announcement {
   createdAt?: string;
   updatedAt?: string;
 }
-
-export const CULT_THEMES = [
-  'Culto de Primícias',
-  'Culto de Missões',
-  'Culto de Santa Ceia',
-  'Culto da Família',
-  'Culto Minha Família no Altar do Senhor',
-  'Culto da Vitória'
-] as const;
 
 export interface Child {
   name: string;

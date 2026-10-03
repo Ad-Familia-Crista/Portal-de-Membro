@@ -433,6 +433,8 @@ export const WorshipFrequencyPage: React.FC = () => {
     if (clean.includes('santa ceia') || clean.includes('ceia')) return 'Culto de Santa Ceia';
     if (clean.includes('altar') || clean.includes('minha família no altar')) return 'Culto Minha Família no Altar do Senhor';
     if (clean.includes('vitória') || clean.includes('vitoria')) return 'Culto da Vitória';
+    if (clean.includes('search')) return 'Culto The Search';
+    if (clean.includes('circulo') || clean.includes('círculo') || clean.includes('oração') || clean.includes('oracao')) return 'Culto Circulo de Oração';
     return 'Culto da Família';
   };
 
