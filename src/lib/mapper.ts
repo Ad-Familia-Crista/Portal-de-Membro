@@ -40,6 +40,7 @@ const FIELD_MAPPING: Record<string, string> = {
   
   // Frequência de Cultos
   cultDate: 'cult_date',
+  speaker: 'speaker',
   totalAttendance: 'total_attendance',
   visitorsAttendance: 'visitors_attendance',
   childrenAttendance: 'children_attendance',

@@ -4,10 +4,12 @@ export interface WorshipFrequency {
   id: string;
   cultDate: string; // Formato YYYY-MM-DD
   theme: 'Culto de Primícias' | 'Culto de Missões' | 'Culto de Santa Ceia' | 'Culto da Família' | 'Culto Minha Família no Altar do Senhor' | 'Culto da Vitória';
+  speaker?: string; // Preleitor que ministrou no culto
   totalAttendance: number;
   visitorsAttendance: number;
-  childrenAttendance: number; // Novo campo
-  membersAttendance: number; // Campo Calculado no front: totalAttendance - (visitorsAttendance + childrenAttendance)
+  childrenAttendance: number;
+  membersAttendance?: number; // Campo Calculado no front: totalAttendance - (visitorsAttendance + childrenAttendance)
+  adultsAttendance?: number;  // Adultos presentes no culto
   createdAt?: string;
   updatedAt?: string;
 }

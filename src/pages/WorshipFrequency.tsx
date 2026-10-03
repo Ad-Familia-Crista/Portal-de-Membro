@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { Modal } from '../components/Modal';
 import { WorshipFrequency, CULT_THEMES } from '../types';
 import { supabase } from '../lib/supabase';
 import { toCamel, toSnake } from '../lib/mapper';
@@ -9,14 +10,19 @@ import { memoryCache } from '../lib/cache';
 import { 
   ClipboardList, 
   Calendar, 
-  Plus, 
   Edit3, 
   Trash2, 
   Save, 
   X, 
   Loader2, 
   Info,
-  AlertTriangle
+  AlertTriangle,
+  Mic,
+  Download,
+  Upload,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 
 export const WorshipFrequencyPage: React.FC = () => {
@@ -39,6 +45,7 @@ export const WorshipFrequencyPage: React.FC = () => {
   
   const [cultDate, setCultDate] = React.useState('');
   const [theme, setTheme] = React.useState<WorshipFrequency['theme']>('Culto da Família');
+  const [speaker, setSpeaker] = React.useState('');
   const [totalAttendance, setTotalAttendance] = React.useState<number | ''>('');
   const [visitorsAttendance, setVisitorsAttendance] = React.useState<number | ''>('');
   const [childrenAttendance, setChildrenAttendance] = React.useState<number | ''>('');
@@ -46,6 +53,24 @@ export const WorshipFrequencyPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [successMsg, setSuccessMsg] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+
+  // States de Exportação e Importação Excel
+  const [exporting, setExporting] = React.useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = React.useState(false);
+  const [importing, setImporting] = React.useState(false);
+  const [importFileName, setImportFileName] = React.useState<string | null>(null);
+  const [importPreview, setImportPreview] = React.useState<Array<{
+    cultDate: string;
+    theme: WorshipFrequency['theme'];
+    speaker: string;
+    totalAttendance: number;
+    visitorsAttendance: number;
+    childrenAttendance: number;
+    adultsAttendance: number;
+    isValid: boolean;
+    errorReason?: string;
+  }>>([]);
+  const [importStatusMsg, setImportStatusMsg] = React.useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Buscar registros de forma paginada de 10 em 10 (otimizado para Vercel)
   const fetchRecords = React.useCallback(async (page: number = 1, force = false) => {
@@ -72,11 +97,31 @@ export const WorshipFrequencyPage: React.FC = () => {
     const to = from + PAGE_SIZE - 1;
 
     try {
-      const { data, count, error } = await supabase
+      let data: any = null;
+      let count: any = null;
+      let error: any = null;
+
+      const res = await supabase
         .from('worship_frequency')
-        .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
+        .select('id, cult_date, theme, speaker, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
         .order('cult_date', { ascending: false })
         .range(from, to);
+
+      data = res.data;
+      count = res.count;
+      error = res.error;
+
+      // Fallback gracioso caso a coluna speaker ainda não tenha sido criada no Supabase
+      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+        const fallbackRes = await supabase
+          .from('worship_frequency')
+          .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
+          .order('cult_date', { ascending: false })
+          .range(from, to);
+        data = fallbackRes.data;
+        count = fallbackRes.count;
+        error = fallbackRes.error;
+      }
 
       if (error) {
         console.error('Erro ao buscar frequências:', error);
@@ -102,8 +147,8 @@ export const WorshipFrequencyPage: React.FC = () => {
     fetchRecords(currentPage);
   }, [currentPage, fetchRecords]);
 
-  // Calcular membros presentes reativamente (Fórmula: Total - (Visitantes + Crianças))
-  const calculatedMembers = React.useMemo(() => {
+  // Calcular adultos presentes reativamente (Fórmula: Total - (Visitantes + Crianças))
+  const calculatedAdults = React.useMemo(() => {
     const total = Number(totalAttendance) || 0;
     const visitors = Number(visitorsAttendance) || 0;
     const children = Number(childrenAttendance) || 0;
@@ -125,6 +170,7 @@ export const WorshipFrequencyPage: React.FC = () => {
     setEditingId(record.id);
     setCultDate(record.cultDate);
     setTheme(record.theme);
+    setSpeaker(record.speaker || '');
     setTotalAttendance(record.totalAttendance);
     setVisitorsAttendance(record.visitorsAttendance);
     setChildrenAttendance(record.childrenAttendance || 0);
@@ -140,6 +186,7 @@ export const WorshipFrequencyPage: React.FC = () => {
     setEditingId(null);
     setCultDate('');
     setTheme('Culto da Família');
+    setSpeaker('');
     setTotalAttendance('');
     setVisitorsAttendance('');
     setChildrenAttendance('');
@@ -209,6 +256,7 @@ export const WorshipFrequencyPage: React.FC = () => {
     const recordPayload = toSnake({
       cultDate,
       theme,
+      speaker: speaker.trim() || null,
       totalAttendance: Number(totalAttendance),
       visitorsAttendance: Number(visitorsAttendance),
       childrenAttendance: Number(childrenAttendance)
@@ -217,10 +265,20 @@ export const WorshipFrequencyPage: React.FC = () => {
     try {
       if (isEditing && editingId) {
         // Atualizar
-        const { error } = await supabase
+        let { error } = await supabase
           .from('worship_frequency')
           .update(recordPayload)
           .eq('id', editingId);
+
+        // Fallback caso a coluna speaker não exista ainda no Supabase
+        if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+          const { speaker: _, ...fallbackPayload } = recordPayload;
+          const retryRes = await supabase
+            .from('worship_frequency')
+            .update(fallbackPayload)
+            .eq('id', editingId);
+          error = retryRes.error;
+        }
 
         if (error) throw error;
         
@@ -232,9 +290,18 @@ export const WorshipFrequencyPage: React.FC = () => {
         fetchRecords(currentPage, true);
       } else {
         // Criar novo
-        const { error } = await supabase
+        let { error } = await supabase
           .from('worship_frequency')
           .insert([recordPayload]);
+
+        // Fallback caso a coluna speaker não exista ainda no Supabase
+        if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+          const { speaker: _, ...fallbackPayload } = recordPayload;
+          const retryRes = await supabase
+            .from('worship_frequency')
+            .insert([fallbackPayload]);
+          error = retryRes.error;
+        }
 
         if (error) throw error;
 
@@ -253,7 +320,6 @@ export const WorshipFrequencyPage: React.FC = () => {
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       console.error('Erro ao salvar frequência:', err);
-      // Tratamento de duplicação no Supabase (código 23505)
       if (err.code === '23505') {
         setErrorMsg('Já existe um registro de frequência cadastrado para este tema nesta data.');
       } else {
@@ -261,6 +327,296 @@ export const WorshipFrequencyPage: React.FC = () => {
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // ==========================================
+  // EXPORTAR EXCEL (.CSV formatado para Excel)
+  // ==========================================
+  const handleExportExcel = async () => {
+    try {
+      setExporting(true);
+      let data: any = null;
+      let error: any = null;
+
+      const res = await supabase
+        .from('worship_frequency')
+        .select('id, cult_date, theme, speaker, total_attendance, visitors_attendance, children_attendance')
+        .order('cult_date', { ascending: false });
+
+      data = res.data;
+      error = res.error;
+
+      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+        const fallbackRes = await supabase
+          .from('worship_frequency')
+          .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance')
+          .order('cult_date', { ascending: false });
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
+
+      if (error) throw error;
+
+      const allRecords: WorshipFrequency[] = toCamel(data) || [];
+      if (allRecords.length === 0) {
+        alert('Não há registros de frequência cadastrados para exportação.');
+        return;
+      }
+
+      const headers = [
+        'Data do Culto',
+        'Tema do Culto',
+        'Preleitor',
+        'Visitantes',
+        'Crianças',
+        'Adultos',
+        'Presença Total'
+      ];
+
+      const rows = allRecords.map(r => {
+        const adults = Math.max(0, r.totalAttendance - (r.visitorsAttendance + (r.childrenAttendance || 0)));
+        return [
+          formatDateDisplay(r.cultDate),
+          r.theme || '',
+          r.speaker || '',
+          r.visitorsAttendance ?? 0,
+          r.childrenAttendance ?? 0,
+          adults,
+          r.totalAttendance ?? 0
+        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
+      });
+
+      const csvContent = '\uFEFF' + [headers.join(';'), ...rows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `frequencia_cultos_adfc_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Erro ao exportar Excel:', err);
+      alert('Erro ao exportar registros para o Excel: ' + (err.message || err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ==========================================
+  // IMPORTAR EXCEL / CSV
+  // ==========================================
+  const handleDownloadTemplate = () => {
+    const headers = ['Data do Culto (AAAA-MM-DD)', 'Tema do Culto', 'Preleitor', 'Presenca Total', 'Visitantes', 'Criancas'];
+    const sampleRows = [
+      ['2026-10-04', 'Culto da Família', 'Pr. João Silva', '160', '25', '20'],
+      ['2026-10-07', 'Culto de Primícias', 'Miss. Maria Souza', '130', '15', '12']
+    ];
+    const csvContent = '\uFEFF' + [headers.join(';'), ...sampleRows.map(r => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'modelo_importacao_frequencia_adfc.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const normalizeTheme = (raw: string): WorshipFrequency['theme'] => {
+    const clean = raw.trim().toLowerCase();
+    if (clean.includes('primícia') || clean.includes('primicia')) return 'Culto de Primícias';
+    if (clean.includes('missão') || clean.includes('missoes') || clean.includes('missões')) return 'Culto de Missões';
+    if (clean.includes('santa ceia') || clean.includes('ceia')) return 'Culto de Santa Ceia';
+    if (clean.includes('altar') || clean.includes('minha família no altar')) return 'Culto Minha Família no Altar do Senhor';
+    if (clean.includes('vitória') || clean.includes('vitoria')) return 'Culto da Vitória';
+    return 'Culto da Família';
+  };
+
+  const parseInputDate = (dateStr: string): string | null => {
+    if (!dateStr) return null;
+    const clean = dateStr.trim();
+    // Formato DD/MM/AAAA ou DD-MM-AAAA
+    if (clean.includes('/')) {
+      const p = clean.split('/');
+      if (p.length === 3 && p[0].length <= 2 && p[1].length <= 2 && p[2].length === 4) {
+        return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+      }
+    }
+    // Formato AAAA-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+      return clean;
+    }
+    return null;
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFileName(file.name);
+    setImportStatusMsg(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = (evt.target?.result as string) || '';
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+
+      if (lines.length <= 1) {
+        setImportPreview([]);
+        setImportStatusMsg({ text: 'O arquivo selecionado está vazio ou contém apenas o cabeçalho.', type: 'error' });
+        return;
+      }
+
+      // Detectar delimitador (';' ou ',')
+      const firstLine = lines[0];
+      const delimiter = firstLine.includes(';') ? ';' : ',';
+
+      // Ignorar cabeçalho se a primeira coluna contiver "data" ou "cult_date"
+      const startIndex = lines[0].toLowerCase().includes('data') || lines[0].toLowerCase().includes('cult') ? 1 : 0;
+      const parsedRows: typeof importPreview = [];
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const rawCols = lines[i].split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
+        if (rawCols.length < 4 || rawCols.every(c => c === '')) continue;
+
+        const rawDate = rawCols[0] || '';
+        const parsedDate = parseInputDate(rawDate);
+        const rawTheme = rawCols[1] || 'Culto da Família';
+        const normTheme = normalizeTheme(rawTheme);
+        
+        let speakerVal = '';
+        let totalVal = 0;
+        let visitorsVal = 0;
+        let childrenVal = 0;
+
+        // Se tem 6 ou mais colunas: Data, Tema, Preleitor, Total, Visitantes, Crianças
+        if (rawCols.length >= 6) {
+          speakerVal = rawCols[2] || '';
+          totalVal = parseInt(rawCols[3], 10) || 0;
+          visitorsVal = parseInt(rawCols[4], 10) || 0;
+          childrenVal = parseInt(rawCols[5], 10) || 0;
+        } else if (rawCols.length === 5) {
+          // 5 colunas: Pode ser Data, Tema, Total, Visitantes, Crianças OU Data, Tema, Preleitor, Total, Visitantes
+          const thirdIsNumber = !isNaN(Number(rawCols[2])) && rawCols[2] !== '';
+          if (thirdIsNumber) {
+            totalVal = parseInt(rawCols[2], 10) || 0;
+            visitorsVal = parseInt(rawCols[3], 10) || 0;
+            childrenVal = parseInt(rawCols[4], 10) || 0;
+          } else {
+            speakerVal = rawCols[2];
+            totalVal = parseInt(rawCols[3], 10) || 0;
+            visitorsVal = parseInt(rawCols[4], 10) || 0;
+          }
+        } else {
+          // 4 colunas: Data, Tema, Total, Visitantes
+          totalVal = parseInt(rawCols[2], 10) || 0;
+          visitorsVal = parseInt(rawCols[3], 10) || 0;
+        }
+
+        let isValid = true;
+        let errorReason = '';
+
+        if (!parsedDate) {
+          isValid = false;
+          errorReason = 'Data inválida (use AAAA-MM-DD ou DD/MM/AAAA)';
+        } else if (totalVal < 0 || visitorsVal < 0 || childrenVal < 0) {
+          isValid = false;
+          errorReason = 'Valores de presença devem ser maiores ou iguais a zero';
+        } else if (visitorsVal + childrenVal > totalVal) {
+          isValid = false;
+          errorReason = `Visitantes (${visitorsVal}) + Crianças (${childrenVal}) excede Total (${totalVal})`;
+        }
+
+        const calculatedAdults = Math.max(0, totalVal - (visitorsVal + childrenVal));
+
+        parsedRows.push({
+          cultDate: parsedDate || rawDate,
+          theme: normTheme,
+          speaker: speakerVal,
+          totalAttendance: totalVal,
+          visitorsAttendance: visitorsVal,
+          childrenAttendance: childrenVal,
+          adultsAttendance: calculatedAdults,
+          isValid,
+          errorReason
+        });
+      }
+
+      setImportPreview(parsedRows);
+    };
+
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = async () => {
+    const validRows = importPreview.filter(r => r.isValid);
+    if (validRows.length === 0) {
+      setImportStatusMsg({ text: 'Nenhum registro válido para importar na planilha.', type: 'error' });
+      return;
+    }
+
+    setImporting(true);
+    setImportStatusMsg(null);
+
+    try {
+      const payloads = validRows.map(r => toSnake({
+        cultDate: r.cultDate,
+        theme: r.theme,
+        speaker: r.speaker.trim() || null,
+        totalAttendance: r.totalAttendance,
+        visitorsAttendance: r.visitorsAttendance,
+        childrenAttendance: r.childrenAttendance
+      }));
+
+      // Inserir ou atualizar via upsert na chave única (cult_date, theme)
+      let { error } = await supabase
+        .from('worship_frequency')
+        .upsert(payloads, { onConflict: 'cult_date, theme' });
+
+      // Fallback gracioso se a coluna speaker ainda não existir no banco
+      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+        const payloadsWithoutSpeaker = payloads.map((p: any) => {
+          const { speaker: _, ...rest } = p;
+          return rest;
+        });
+        const retryRes = await supabase
+          .from('worship_frequency')
+          .upsert(payloadsWithoutSpeaker, { onConflict: 'cult_date, theme' });
+        error = retryRes.error;
+      }
+
+      if (error) throw error;
+
+      // Invalidar caches
+      memoryCache.invalidate('worship_frequency');
+      memoryCache.invalidate('worship_frequency_all');
+
+      setImportStatusMsg({
+        text: `Sucesso! ${validRows.length} registros foram importados/atualizados com êxito.`,
+        type: 'success'
+      });
+
+      // Recarrega listagem
+      fetchRecords(currentPage, true);
+
+      setTimeout(() => {
+        setIsImportModalOpen(false);
+        setImportPreview([]);
+        setImportFileName(null);
+        setImportStatusMsg(null);
+      }, 2000);
+    } catch (err: any) {
+      console.error('Erro na importação em lote:', err);
+      setImportStatusMsg({
+        text: 'Erro ao salvar registros no banco de dados: ' + (err.message || err),
+        type: 'error'
+      });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -294,7 +650,7 @@ export const WorshipFrequencyPage: React.FC = () => {
       {/* FORMULÁRIO */}
       <Card title={isEditing ? "Editar Registro de Frequência" : "Lançar Nova Frequência"}>
         <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* Campo 1: Data do Culto */}
             <div>
@@ -330,8 +686,22 @@ export const WorshipFrequencyPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Campo 3: Presença Total */}
-            {/* Fechamento da grid anterior */}
+            {/* Campo 3: Preleitor (Quem pregou no culto) */}
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                Preleitor (Ministro da Palavra)
+              </label>
+              <div className="relative">
+                <Mic className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+                <input 
+                  type="text" 
+                  placeholder="Ex: Pr. João Silva" 
+                  value={speaker}
+                  onChange={(e) => setSpeaker(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-muted/15 outline-none focus:ring-2 focus:ring-primary text-sm bg-background/50"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -350,7 +720,6 @@ export const WorshipFrequencyPage: React.FC = () => {
               />
             </div>
 
-            {/* Campo 4: Presença Visitantes */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-primary mb-1">
                 Total Visitantes <span className="text-rose-500">*</span>
@@ -366,7 +735,6 @@ export const WorshipFrequencyPage: React.FC = () => {
               />
             </div>
 
-            {/* Campo 5: Total Crianças */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-primary mb-1">
                 Total Crianças <span className="text-rose-500">*</span>
@@ -383,17 +751,17 @@ export const WorshipFrequencyPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Campo Calculado Automático: Membros Presentes */}
+          {/* Campo Calculado Automático: Adultos Presentes */}
           <div className="p-4 bg-primary/5 rounded-xl border border-primary/10 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Info className="w-5 h-5 text-primary" />
               <div>
-                <p className="text-sm font-bold text-primary">Membros Presentes (Calculado)</p>
+                <p className="text-sm font-bold text-primary">Adultos Presentes (Calculado)</p>
                 <p className="text-[10px] text-muted font-medium">Fórmula: Presença Total - (Total Visitantes + Total Crianças)</p>
               </div>
             </div>
             <div className="text-2xl font-display font-bold text-primary">
-              {calculatedMembers}
+              {calculatedAdults}
             </div>
           </div>
 
@@ -419,8 +787,41 @@ export const WorshipFrequencyPage: React.FC = () => {
         </form>
       </Card>
 
-      {/* LISTAGEM DE HISTÓRICO */}
-      <Card title="Histórico de Frequência de Cultos">
+      {/* LISTAGEM DE HISTÓRICO COM EXPORTAÇÃO E IMPORTAÇÃO EXCEL */}
+      <Card>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-muted/10">
+          <div>
+            <h2 className="text-lg sm:text-xl font-display font-bold text-primary">Histórico de Frequência de Cultos</h2>
+            <p className="text-xs text-muted">Histórico detalhado das presenças e relatórios analíticos</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm"
+              onClick={() => setIsImportModalOpen(true)}
+              className="text-xs font-semibold shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5 mr-1.5 text-primary" /> Importar Excel
+            </Button>
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="text-xs font-semibold shadow-sm"
+            >
+              {exporting ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 mr-1.5 text-primary" />
+              )}
+              Exportar Excel
+            </Button>
+          </div>
+        </div>
+
         {loading ? (
           <div className="py-12 flex flex-col items-center justify-center gap-4">
             <Loader2 className="w-10 h-10 text-primary animate-spin" />
@@ -440,23 +841,34 @@ export const WorshipFrequencyPage: React.FC = () => {
                 <tr className="bg-background text-primary border-b border-muted/15 font-bold uppercase tracking-wider text-[10px]">
                   <th className="p-4">Data do Culto</th>
                   <th className="p-4">Tema do Culto</th>
+                  <th className="p-4">Preleitor</th>
                   <th className="p-4 text-center">Visitantes</th>
                   <th className="p-4 text-center">Crianças</th>
-                  <th className="p-4 text-center">Membros</th>
+                  <th className="p-4 text-center">Adultos</th>
                   <th className="p-4 text-center">Total Geral</th>
                   <th className="p-4 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-muted/10">
                 {records.map((r) => {
-                  const calculatedMemb = Math.max(0, r.totalAttendance - (r.visitorsAttendance + (r.childrenAttendance || 0)));
+                  const calculatedAdultsRow = Math.max(0, r.totalAttendance - (r.visitorsAttendance + (r.childrenAttendance || 0)));
                   return (
                     <tr key={r.id} className="hover:bg-primary/5 transition-colors">
                       <td className="p-4 font-bold text-primary">{formatDateDisplay(r.cultDate)}</td>
                       <td className="p-4 font-semibold text-primary">{r.theme}</td>
+                      <td className="p-4 text-slate-700 font-medium">
+                        {r.speaker ? (
+                          <span className="flex items-center gap-1.5">
+                            <Mic className="w-3.5 h-3.5 text-muted shrink-0" />
+                            {r.speaker}
+                          </span>
+                        ) : (
+                          <span className="text-muted/40 italic text-xs">Não informado</span>
+                        )}
+                      </td>
                       <td className="p-4 text-center font-medium text-amber-600 bg-amber-500/5">{r.visitorsAttendance}</td>
                       <td className="p-4 text-center font-medium text-indigo-600 bg-indigo-500/5">{r.childrenAttendance || 0}</td>
-                      <td className="p-4 text-center font-medium text-primary bg-primary/5">{calculatedMemb}</td>
+                      <td className="p-4 text-center font-medium text-primary bg-primary/5">{calculatedAdultsRow}</td>
                       <td className="p-4 text-center font-bold text-primary">{r.totalAttendance}</td>
                       <td className="p-4 text-right">
                         <div className="flex gap-1.5 justify-end">
@@ -518,6 +930,153 @@ export const WorshipFrequencyPage: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* MODAL DE IMPORTAÇÃO DE PLANILHA EXCEL / CSV */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          if (!importing) {
+            setIsImportModalOpen(false);
+            setImportPreview([]);
+            setImportFileName(null);
+            setImportStatusMsg(null);
+          }
+        }}
+        title="Importar Frequência de Cultos via Excel"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              type="button"
+              className="text-xs"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Baixar Modelo de Planilha
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsImportModalOpen(false)}
+                disabled={importing}
+                type="button"
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleExecuteImport}
+                disabled={importing || importPreview.filter(r => r.isValid).length === 0}
+                type="button"
+              >
+                {importing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Importando...
+                  </>
+                ) : (
+                  `Confirmar Importação (${importPreview.filter(r => r.isValid).length})`
+                )}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-blue-900 leading-relaxed space-y-1">
+            <p className="font-bold flex items-center gap-1.5">
+              <FileSpreadsheet className="w-4 h-4 text-blue-600" /> Instruções de Importação:
+            </p>
+            <p>1. O arquivo deve ser formato <strong>.CSV</strong> (separado por ponto e vírgula <code>;</code> ou vírgula <code>,</code>).</p>
+            <p>2. Colunas esperadas: <code>Data; Tema; Preleitor; Presença Total; Visitantes; Crianças</code>.</p>
+            <p>3. Registros de mesma data e tema serão atualizados com os novos dados importados.</p>
+          </div>
+
+          {/* UPLOAD DE ARQUIVO */}
+          <div className="border-2 border-dashed border-muted/20 hover:border-primary/50 transition-colors rounded-xl p-6 text-center bg-background/30">
+            <input 
+              type="file" 
+              accept=".csv, text/csv, .txt, .xlsx"
+              id="excel-freq-input"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <label htmlFor="excel-freq-input" className="cursor-pointer flex flex-col items-center gap-2">
+              <Upload className="w-8 h-8 text-primary" />
+              <p className="text-sm font-bold text-primary">
+                {importFileName ? `Arquivo: ${importFileName}` : 'Clique para selecionar a planilha (.csv)'}
+              </p>
+              <p className="text-[11px] text-muted">Formatos aceitos: Planilha CSV exportada do Excel</p>
+            </label>
+          </div>
+
+          {/* MENSAGEM DE STATUS */}
+          {importStatusMsg && (
+            <div className={`p-3 rounded-lg text-xs font-semibold flex items-center gap-2 ${
+              importStatusMsg.type === 'success' 
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                : 'bg-rose-50 text-rose-800 border border-rose-200'
+            }`}>
+              {importStatusMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+              )}
+              {importStatusMsg.text}
+            </div>
+          )}
+
+          {/* PREVIEW DOS DADOS */}
+          {importPreview.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-primary">
+                  Prévia dos Registros ({importPreview.filter(r => r.isValid).length} válidos de {importPreview.length})
+                </p>
+              </div>
+              <div className="max-h-60 overflow-y-auto border border-muted/15 rounded-lg text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-background sticky top-0 text-[10px] uppercase font-bold text-primary border-b border-muted/10">
+                    <tr>
+                      <th className="p-2">Status</th>
+                      <th className="p-2">Data</th>
+                      <th className="p-2">Tema</th>
+                      <th className="p-2">Preleitor</th>
+                      <th className="p-2 text-center">Visitantes</th>
+                      <th className="p-2 text-center">Crianças</th>
+                      <th className="p-2 text-center">Adultos</th>
+                      <th className="p-2 text-center">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-muted/10">
+                    {importPreview.map((item, idx) => (
+                      <tr key={idx} className={item.isValid ? 'hover:bg-primary/5' : 'bg-rose-50/60'}>
+                        <td className="p-2 font-bold whitespace-nowrap">
+                          {item.isValid ? (
+                            <span className="text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-[10px]">Válido</span>
+                          ) : (
+                            <span className="text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[10px]" title={item.errorReason}>
+                              Erro
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2 whitespace-nowrap">{formatDateDisplay(item.cultDate)}</td>
+                        <td className="p-2 whitespace-nowrap">{item.theme}</td>
+                        <td className="p-2 whitespace-nowrap text-muted font-medium">{item.speaker || '-'}</td>
+                        <td className="p-2 text-center">{item.visitorsAttendance}</td>
+                        <td className="p-2 text-center">{item.childrenAttendance}</td>
+                        <td className="p-2 text-center font-bold text-primary">{item.adultsAttendance}</td>
+                        <td className="p-2 text-center font-bold">{item.totalAttendance}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

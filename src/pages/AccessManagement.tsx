@@ -136,7 +136,7 @@ export const AccessManagement: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Explicação dos Níveis */}
         <div className="lg:col-span-1 space-y-4">
-          <Card title="Níveis de Permissão" className="bg-primary text-white border-none">
+          <Card title="Níveis de Permissão" titleClassName="text-white" className="bg-primary text-white border-none">
             <div className="space-y-6 mt-4">
               <div className="flex gap-3">
                 <div className="p-2 bg-white/10 rounded-lg">

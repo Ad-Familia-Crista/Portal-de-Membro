@@ -75,10 +75,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
 
     setFreqLoading(true);
     try {
-      const { data, error } = await supabase
+      let data: any = null;
+      let error: any = null;
+
+      const res = await supabase
         .from('worship_frequency')
-        .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
+        .select('id, cult_date, theme, speaker, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
         .order('cult_date', { ascending: true }); // Ordenação ascendente para linhas temporais perfeitas
+      
+      data = res.data;
+      error = res.error;
+
+      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
+        const fallbackRes = await supabase
+          .from('worship_frequency')
+          .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at')
+          .order('cult_date', { ascending: true });
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
 
       if (error) {
         console.error('Erro ao buscar frequências:', error);
@@ -299,13 +314,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
 
   // Gráfico 1: Evolução de Presença (Linha Temporal) - Cores da Identidade solicitadas
   const evolutionChartData = React.useMemo(() => {
-    return filteredFreqs.map(f => ({
-      date: formatDateDisplay(f.cultDate),
-      'Presença Total': f.totalAttendance,
-      'Visitantes': f.visitorsAttendance,
-      'Crianças': f.childrenAttendance || 0,
-      'Membros': Math.max(0, f.totalAttendance - (f.visitorsAttendance + (f.childrenAttendance || 0)))
-    }));
+    return filteredFreqs.map(f => {
+      const adultsCount = Math.max(0, f.totalAttendance - (f.visitorsAttendance + (f.childrenAttendance || 0)));
+      return {
+        date: formatDateDisplay(f.cultDate),
+        'Presença Total': f.totalAttendance,
+        'Visitantes': f.visitorsAttendance,
+        'Crianças': f.childrenAttendance || 0,
+        'Adultos': adultsCount,
+        'Membros': adultsCount
+      };
+    });
   }, [filteredFreqs]);
 
   // Gráfico 2: Crescimento Mensal (Média de Público por Mês) - Barras Verticais Agrupadas
@@ -325,11 +344,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
       const childrenSum = monthFreqs.reduce((acc, f) => acc + (f.childrenAttendance || 0), 0);
       const avgChildren = monthFreqs.length > 0 ? Math.round(childrenSum / monthFreqs.length) : 0;
 
-      const avgMemb = Math.max(0, avgTotal - (avgVisitors + avgChildren));
+      const avgAdults = Math.max(0, avgTotal - (avgVisitors + avgChildren));
 
       return {
         month: monthName.substring(0, 3), // "Jan", "Fev"
-        'Membros': avgMemb,
+        'Adultos': avgAdults,
+        'Membros': avgAdults,
         'Visitantes': avgVisitors,
         'Crianças': avgChildren,
         'Média Geral': avgTotal
@@ -444,14 +464,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
       ['Total de Cultos Realizados', totalCults],
       ['Presença Média Geral', avgAttendance],
       ['Presença Média de Visitantes', avgVisitors],
-      ['Presença Média de Membros', avgMembersPresent],
+      ['Presença Média de Adultos', avgMembersPresent],
       ['Taxa Média de Engajamento de Membros', `${engagementPercent}%`],
       [],
       ['2. HISTÓRICO ANALÍTICO DOS CULTOS'],
-      ['Data do Culto', 'Tema do Culto', 'Presença Visitantes', 'Presença Crianças', 'Presença Membros', 'Presença Total'],
+      ['Data do Culto', 'Tema do Culto', 'Preleitor', 'Presença Visitantes', 'Presença Crianças', 'Presença Adultos', 'Presença Total'],
       ...filteredFreqs.map(f => [
         formatDateDisplay(f.cultDate),
         f.theme,
+        f.speaker || '',
         f.visitorsAttendance,
         f.childrenAttendance || 0,
         Math.max(0, f.totalAttendance - (f.visitorsAttendance + (f.childrenAttendance || 0))),
@@ -785,7 +806,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
                             <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, fontWeight: 'bold' }} />
                             {/* Verde/Petróleo para Total, Azul Escuro para Membros, Dourado/Amarelo para Visitantes */}
                             <Line type="monotone" name="Presença Total" dataKey="Presença Total" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                            <Line type="monotone" name="Membros Presentes" dataKey="Membros" stroke="#1E2A4A" strokeWidth={3} dot={{ r: 4 }} />
+                            <Line type="monotone" name="Adultos Presentes" dataKey="Adultos" stroke="#1E2A4A" strokeWidth={3} dot={{ r: 4 }} />
                             <Line type="monotone" name="Visitantes" dataKey="Visitantes" stroke="#ffbb24" strokeWidth={3} dot={{ r: 4 }} />
                           </LineChart>
                         </ResponsiveContainer>
@@ -848,7 +869,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
                 
                 {/* 2. Crescimento Mensal (Barras Verticais Agrupadas - Sem stackId) */}
                 <Card title="2º Crescimento Mensal">
-                  <p className="text-xs text-muted font-medium mb-4 -mt-2">Objetivo: Comparar presenças (membros/Visitantes) por meses.</p>
+                  <p className="text-xs text-muted font-medium mb-4 -mt-2">Objetivo: Comparar presenças (Adultos/Visitantes) por meses.</p>
                   <div className="h-[300px] w-full mt-4">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={monthlyBarChartData}>
@@ -860,7 +881,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
                         />
                         <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, fontWeight: 'bold' }} />
                         {/* Barras dispostas lado a lado (agrupadas) com cantos arredondados */}
-                        <Bar dataKey="Membros" fill="#1E2A4A" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Adultos" fill="#1E2A4A" radius={[4, 4, 0, 0]} />
                         <Bar dataKey="Visitantes" fill="#ffbb24" radius={[4, 4, 0, 0]} />
                         <Bar dataKey="Média Geral" fill="#10b981" radius={[4, 4, 0, 0]} />
                       </BarChart>

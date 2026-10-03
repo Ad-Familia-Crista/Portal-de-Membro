@@ -19,8 +19,7 @@ import {
   Cake,
   Edit2,
   Trash2,
-  Loader2,
-  Star
+  Loader2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Modal } from '../components/Modal';
@@ -247,11 +246,6 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
         <div>
           <h1 className="text-xl font-display font-bold text-white tracking-tight flex items-center gap-2">
             <span>Olá, {userFirstName.toUpperCase()}!</span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#EAAA00] shrink-0 inline-block shadow-sm" aria-hidden="true" />
-              <span className="w-2.5 h-2.5 rounded-full bg-[#EAAA00] shrink-0 inline-block shadow-sm" aria-hidden="true" />
-              <Star className="w-3.5 h-3.5 text-white fill-white shrink-0" aria-hidden="true" />
-            </span>
           </h1>
           <p className="text-[#EAAA00] text-sm font-medium mt-0.5">Seja bem-vindo(a) ao Portal de Membro</p>
         </div>
