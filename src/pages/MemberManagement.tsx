@@ -43,6 +43,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [searchTerm, setSearchTerm] = React.useState('');
   const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
   const [selectedMember, setSelectedMember] = React.useState<Member | null>(null);
+  const [loadingDetailsId, setLoadingDetailsId] = React.useState<string | null>(null);
   const [showHistoryForm, setShowHistoryForm] = React.useState(false);
   const [eventData, setEventData] = React.useState<Partial<MinisterialEvent>>({
     type: 'PROMOÇÃO',
@@ -74,7 +75,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
     setSelectedMember({
       ...selectedMember,
-      ministerialHistory: [newEvent, ...selectedMember.ministerialHistory]
+      ministerialHistory: [newEvent, ...(selectedMember.ministerialHistory || [])]
     });
 
     setEventData({
@@ -142,12 +143,44 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     }
   };
 
-  const handleEdit = (member: Member) => {
-    setSelectedMember({
-      ...member,
-      education: member.education ? (member.education.startsWith('Ensino ') ? member.education : `Ensino ${member.education}`) : ''
-    });
-    setIsEditModalOpen(true);
+  const handleEdit = async (member: Member) => {
+    setLoadingDetailsId(member.id);
+    try {
+      // Carregamento sob demanda pontual de photo_url e ministerial_history
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('photo_url, ministerial_history')
+        .eq('id', member.id)
+        .single();
+
+      if (error) {
+        console.warn('Aviso ao carregar dados complementares do membro:', error.message || error);
+      }
+
+      const camelDetails = data ? toCamel(data) : {};
+
+      setSelectedMember({
+        ...member,
+        photoUrl: camelDetails.photoUrl !== undefined ? camelDetails.photoUrl : (member.photoUrl || ''),
+        ministerialHistory: Array.isArray(camelDetails.ministerialHistory) 
+          ? camelDetails.ministerialHistory 
+          : (member.ministerialHistory || []),
+        education: member.education ? (member.education.startsWith('Ensino ') ? member.education : `Ensino ${member.education}`) : ''
+      });
+      setIsEditModalOpen(true);
+    } catch (err: any) {
+      console.error('Erro ao abrir edição do membro:', err);
+      // Fallback gracioso: abre o modal com os dados disponíveis sem travar a interface
+      setSelectedMember({
+        ...member,
+        photoUrl: member.photoUrl || '',
+        ministerialHistory: member.ministerialHistory || [],
+        education: member.education ? (member.education.startsWith('Ensino ') ? member.education : `Ensino ${member.education}`) : ''
+      });
+      setIsEditModalOpen(true);
+    } finally {
+      setLoadingDetailsId(null);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -329,10 +362,16 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
+                            disabled={loadingDetailsId === member.id}
                             onClick={() => handleEdit(member)}
                             className="text-primary hover:bg-primary/10"
+                            title="Editar Cadastro"
                           >
-                            <Edit2 className="w-4 h-4" />
+                            {loadingDetailsId === member.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                            ) : (
+                              <Edit2 className="w-4 h-4" />
+                            )}
                           </Button>
                         )}
                         {isAdmin && (
@@ -1093,7 +1132,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 )}
 
                 <div className="relative pl-4 space-y-6 before:absolute before:left-[7px] before:top-2 before:bottom-2 before:w-0.5 before:bg-muted/10">
-                  {selectedMember.ministerialHistory.map((event, idx) => (
+                  {(selectedMember.ministerialHistory || []).map((event, idx) => (
                     <div key={event.id} className="relative">
                       <div className="absolute -left-[13px] top-1.5 w-3 h-3 rounded-full bg-secondary border-2 border-white shadow-sm" />
                       <div className="space-y-1">

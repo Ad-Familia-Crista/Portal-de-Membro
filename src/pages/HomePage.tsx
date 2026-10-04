@@ -36,9 +36,9 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   const [announcements, setAnnouncements] = React.useState<Announcement[]>(() => {
-    return memoryCache.get<Announcement[]>('announcements') || [];
+    return memoryCache.get<Announcement[]>('mural_de_avisos') || [];
   });
-  const [loading, setLoading] = React.useState(() => !memoryCache.get('announcements'));
+  const [loading, setLoading] = React.useState(() => !memoryCache.get('mural_de_avisos'));
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [editingAnnouncement, setEditingAnnouncement] = React.useState<Announcement | null>(null);
 
@@ -54,7 +54,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
   const fetchAnnouncements = React.useCallback(async (force = false) => {
     if (!force) {
-      const cached = memoryCache.get<Announcement[]>('announcements');
+      const cached = memoryCache.get<Announcement[]>('mural_de_avisos');
       if (cached) {
         setAnnouncements(cached);
         setLoading(false);
@@ -68,7 +68,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
     try {
       // Otimização: Selecionar apenas as colunas necessárias para o mural
       const { data, error } = await supabase
-        .from('announcements')
+        .from('mural_de_avisos')
         .select('id, title, date_info, type, start_date, end_date, created_at')
         .order('start_date', { ascending: false });
 
@@ -78,7 +78,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
       } else if (data) {
         const camelData = toCamel(data) || [];
         setAnnouncements(camelData);
-        memoryCache.set('announcements', camelData, 3 * 60 * 1000); // 3 minutos de cache
+        memoryCache.set('mural_de_avisos', camelData, 3 * 60 * 1000); // 3 minutos de cache
       }
     } catch (err: any) {
       console.warn('Exceção ao buscar avisos no mural:', err);
@@ -134,7 +134,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
 
       if (editingAnnouncement) {
         const { error } = await supabase
-          .from('announcements')
+          .from('mural_de_avisos')
           .update(payload)
           .eq('id', editingAnnouncement.id);
 
@@ -142,7 +142,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
         showToast('Aviso atualizado com sucesso!', 'success');
       } else {
         const { error } = await supabase
-          .from('announcements')
+          .from('mural_de_avisos')
           .insert([payload]);
 
         if (error) throw error;
@@ -158,7 +158,7 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
         startDate: new Date().toISOString().split('T')[0],
         endDate: ''
       });
-      memoryCache.invalidate('announcements');
+      memoryCache.invalidate('mural_de_avisos');
       fetchAnnouncements(true);
     } catch (err: any) {
       console.error('Erro ao salvar aviso:', err);
@@ -182,13 +182,13 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
     if (!window.confirm('Tem certeza de que deseja excluir este aviso permanentemente?')) return;
     try {
       const { error } = await supabase
-        .from('announcements')
+        .from('mural_de_avisos')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
       showToast('Aviso excluído com sucesso!', 'success');
-      memoryCache.invalidate('announcements');
+      memoryCache.invalidate('mural_de_avisos');
       fetchAnnouncements(true);
     } catch (err: any) {
       console.error('Erro ao excluir aviso:', err);

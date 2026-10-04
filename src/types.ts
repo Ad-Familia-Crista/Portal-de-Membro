@@ -117,7 +117,7 @@ export interface Member {
   consecrationDate?: string;
   
   // History
-  ministerialHistory: MinisterialEvent[];
+  ministerialHistory?: MinisterialEvent[];
   
   // Metadata
   photoUrl?: string;

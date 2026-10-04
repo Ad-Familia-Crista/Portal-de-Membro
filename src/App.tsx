@@ -85,8 +85,8 @@ const AppContent: React.FC = () => {
             naturalness, nationality, marital_status, cep, address, number, neighborhood, city, state, 
             cell, phones, education, profession, is_baptized, is_holy_spirit_baptized, entry_date, 
             current_position, position_start_date, consecrated_to, consecration_date, departments, 
-            leader_department, role, status, photo_url, valid_until, last_updated, aceitou_politica, 
-            data_aceite, data_recusa, has_children, children, ministerial_history
+            leader_department, role, status, valid_until, last_updated, aceitou_politica, 
+            data_aceite, data_recusa, has_children, children
           `)
           .order('first_name', { ascending: true });
         data = res.data;

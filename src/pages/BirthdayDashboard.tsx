@@ -33,13 +33,6 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
   const [onlyActive, setOnlyActive] = React.useState(true);
   const yearFilter = new Date().getFullYear();
 
-  // Auto-carregar membros ao montar a página se a lista ainda estiver vazia
-  React.useEffect(() => {
-    if (members.length === 0 && !loading) {
-      onRefresh();
-    }
-  }, []);
-
   const months = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'

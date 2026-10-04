@@ -228,6 +228,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
   // Cache em memória para verificações de CPF instantâneas sem bater repetidamente no banco
   const verifiedCpfsCacheRef = React.useRef<Map<string, string | null>>(new Map());
+  // Rastreia requisições de validação de CPF já em andamento para evitar chamadas concorrentes duplicadas
+  const inFlightCpfPromisesRef = React.useRef<Map<string, Promise<string | null>>>(new Map());
 
   const isAdminOrSecretary = user?.role === 'ADMIN' || user?.role === 'SECRETARY';
 
@@ -374,7 +376,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
   }, [hasChildren, setValue, step]);
 
-  // Consulta ultra-otimizada de existência de CPF de filho com cache em memória e validação instantânea
+  // Consulta ultra-otimizada de existência de CPF de filho com cache em memória, compartilhamento de promessas e validação instantânea
   const validateChildCpfInDatabase = async (cpf: string, childIndex: number): Promise<string | null> => {
     const clean = (cpf || '').replace(/\D/g, '');
     if (clean.length !== 11) {
@@ -399,45 +401,53 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       return verifiedCpfsCacheRef.current.get(clean) || null;
     }
 
-    // 3. Consultar banco de dados Supabase via RPC PostgreSQL ultra-rápida (índice B-Tree e GIN)
-    try {
-      const { data: existsRpc, error: rpcError } = await supabase.rpc('check_child_cpf_exists', {
-        check_cpf: clean,
-        exclude_user_id: user?.id || null
-      });
-
-      if (!rpcError && typeof existsRpc === 'boolean') {
-        if (existsRpc) {
-          verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
-          return 'CPF já cadastrado';
-        } else {
-          verifiedCpfsCacheRef.current.set(clean, null);
-          return null;
-        }
-      }
-
-      // Fallback caso a função RPC não esteja criada no banco (verifica apenas na lista children)
-      const formattedCpf = maskCPF(clean);
-
-      const { data: childMatches, error: childError } = await supabase
-        .from('profiles')
-        .select('id')
-        .filter('children', 'cs', JSON.stringify([{ cpf: formattedCpf }]))
-        .limit(1);
-
-      if (!childError && childMatches && childMatches.length > 0) {
-        if (!user || childMatches[0].id !== user.id) {
-          verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
-          return 'CPF já cadastrado';
-        }
-      }
-
-      verifiedCpfsCacheRef.current.set(clean, null);
-      return null;
-    } catch (err) {
-      console.warn('Exceção ao verificar CPF no banco:', err);
-      return null;
+    // 3. Se já existe uma requisição em andamento para este mesmo CPF, reutiliza a mesma promessa
+    if (inFlightCpfPromisesRef.current.has(clean)) {
+      return inFlightCpfPromisesRef.current.get(clean)!;
     }
+
+    // 4. Executa consulta no Supabase protegida contra concorrência
+    const validationPromise = (async () => {
+      try {
+        const { data: existsRpc, error: rpcError } = await supabase.rpc('check_child_cpf_exists', {
+          check_cpf: clean,
+          exclude_user_id: user?.id || null
+        });
+
+        if (!rpcError && typeof existsRpc === 'boolean') {
+          const result = existsRpc ? 'CPF já cadastrado' : null;
+          verifiedCpfsCacheRef.current.set(clean, result);
+          return result;
+        }
+
+        // Fallback caso a função RPC não esteja criada no banco (verifica apenas na lista children)
+        const formattedCpf = maskCPF(clean);
+
+        const { data: childMatches, error: childError } = await supabase
+          .from('profiles')
+          .select('id')
+          .filter('children', 'cs', JSON.stringify([{ cpf: formattedCpf }]))
+          .limit(1);
+
+        if (!childError && childMatches && childMatches.length > 0) {
+          if (!user || childMatches[0].id !== user.id) {
+            verifiedCpfsCacheRef.current.set(clean, 'CPF já cadastrado');
+            return 'CPF já cadastrado';
+          }
+        }
+
+        verifiedCpfsCacheRef.current.set(clean, null);
+        return null;
+      } catch (err) {
+        console.warn('Exceção ao verificar CPF no banco:', err);
+        return null;
+      } finally {
+        inFlightCpfPromisesRef.current.delete(clean);
+      }
+    })();
+
+    inFlightCpfPromisesRef.current.set(clean, validationPromise);
+    return validationPromise;
   };
 
   const handleChildCpfBlur = async (cpf: string, index: number) => {
@@ -466,6 +476,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       return;
     }
 
+    // Se já estiver validando via inFlight, apenas aguarda sem duplicar
     setChildCpfValidating(prev => ({ ...prev, [index]: true }));
     const errorMsg = await validateChildCpfInDatabase(cpf, index);
     setChildCpfValidating(prev => ({ ...prev, [index]: false }));
@@ -647,6 +658,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
       // Validação estrita e amigável da Etapa 2
       if (step === 2) {
+        // Se houver algum erro de CPF já detectado e ativo, impede o avanço imediatamente
+        const currentDbErrors = Object.values(childCpfDbErrors).filter(Boolean);
+        if (currentDbErrors.length > 0) {
+          showToast(currentDbErrors[0], 'error');
+          return;
+        }
+
         const isStepValid = await trigger(['maritalStatus', 'marriageDate', 'spouseName', 'hasChildren', 'children']);
         
         if (!isStepValid) {
@@ -655,28 +673,36 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         }
 
         if (hasChildrenVal === 'Sim' && currentChildren.length > 0) {
-          // Validar duplicidade de CPF no banco em paralelo
-          const checkPromises = currentChildren.map((ch, i) => validateChildCpfInDatabase(ch.cpf, i));
-          const checkResults = await Promise.all(checkPromises);
-          const newDbErrors: Record<number, string> = {};
-          let dbErrorFound = false;
+          // Checa se algum dependente precisa ser validado no banco
+          const needsValidation = currentChildren.some(ch => {
+            const clean = (ch.cpf || '').replace(/\D/g, '');
+            return clean.length === 11 && !verifiedCpfsCacheRef.current.has(clean);
+          }) || inFlightCpfPromisesRef.current.size > 0;
 
-          for (let i = 0; i < checkResults.length; i++) {
-            const dbError = checkResults[i];
-            if (dbError) {
-              newDbErrors[i] = dbError;
-              dbErrorFound = true;
-              showToast(`${dbError} para o ${i + 1}º dependente.`, 'error');
+          // Só executa se houver dependente pendente de validação
+          if (needsValidation) {
+            const checkPromises = currentChildren.map((ch, i) => validateChildCpfInDatabase(ch.cpf, i));
+            const checkResults = await Promise.all(checkPromises);
+            const newDbErrors: Record<number, string> = {};
+            let dbErrorFound = false;
+
+            for (let i = 0; i < checkResults.length; i++) {
+              const dbError = checkResults[i];
+              if (dbError) {
+                newDbErrors[i] = dbError;
+                dbErrorFound = true;
+                showToast(`${dbError} para o ${i + 1}º dependente.`, 'error');
+              }
             }
-          }
-          setChildCpfDbErrors(newDbErrors);
+            setChildCpfDbErrors(newDbErrors);
 
-          if (dbErrorFound) {
-            return;
+            if (dbErrorFound) {
+              return;
+            }
           }
         }
 
-        // Etapa 2 validada com sucesso!
+        // Etapa 2 validada com sucesso! Avanço imediato em 0ms
         setStep(3);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
@@ -986,7 +1012,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                                         clearTimeout(childCpfTimersRef.current[index]);
                                       }
 
-                                      // Quando atinge os 11 dígitos, inicia validação antecipada em background (debounce 250ms)
+                                      // Quando atinge os 11 dígitos, inicia validação antecipada em background (debounce rápido 100ms)
                                       if (clean.length === 11) {
                                         childCpfTimersRef.current[index] = setTimeout(async () => {
                                           setChildCpfValidating(prev => ({ ...prev, [index]: true }));
@@ -998,7 +1024,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                                             else delete next[index];
                                             return next;
                                           });
-                                        }, 250);
+                                        }, 100);
                                       }
                                     }}
                                     onBlur={(e) => {
