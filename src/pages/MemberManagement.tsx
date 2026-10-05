@@ -25,6 +25,7 @@ import { supabase } from '../lib/supabase';
 import { toSnake, toCamel } from '../lib/mapper';
 import { optimizeImage } from '../lib/imageOptimizer';
 import { MemberTableSkeleton } from '../components/Skeletons';
+import { useToast } from '../components/Toast';
 
 interface MemberManagementProps {
   members: Member[];
@@ -40,10 +41,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   onUpdateMembers
 }) => {
   const { user } = useAuth();
+  const { showToast, ToastContainer } = useToast();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
   const [selectedMember, setSelectedMember] = React.useState<Member | null>(null);
   const [loadingDetailsId, setLoadingDetailsId] = React.useState<string | null>(null);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const isSavingRef = React.useRef(false);
+  const originalPhotoRef = React.useRef<string>('');
   const [showHistoryForm, setShowHistoryForm] = React.useState(false);
   const [eventData, setEventData] = React.useState<Partial<MinisterialEvent>>({
     type: 'PROMOÇÃO',
@@ -158,10 +163,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       }
 
       const camelDetails = data ? toCamel(data) : {};
+      const fetchedPhoto = camelDetails.photoUrl !== undefined ? camelDetails.photoUrl : (member.photoUrl || '');
+      originalPhotoRef.current = fetchedPhoto || '';
 
       setSelectedMember({
         ...member,
-        photoUrl: camelDetails.photoUrl !== undefined ? camelDetails.photoUrl : (member.photoUrl || ''),
+        photoUrl: fetchedPhoto,
         ministerialHistory: Array.isArray(camelDetails.ministerialHistory) 
           ? camelDetails.ministerialHistory 
           : (member.ministerialHistory || []),
@@ -170,6 +177,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       setIsEditModalOpen(true);
     } catch (err: any) {
       console.error('Erro ao abrir edição do membro:', err);
+      originalPhotoRef.current = member.photoUrl || '';
       // Fallback gracioso: abre o modal com os dados disponíveis sem travar a interface
       setSelectedMember({
         ...member,
@@ -184,18 +192,45 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   };
 
   const handleSaveEdit = async () => {
-    if (selectedMember) {
+    if (isSavingRef.current || !selectedMember) return;
+    isSavingRef.current = true;
+    setIsSaving(true);
+
+    try {
+      const snakePayload = toSnake(selectedMember);
+
+      // OTIMIZAÇÃO FASE 1: Se a foto não foi alterada pelo usuário, remove photo_url do payload
+      // para não reenviar dezenas/centenas de KB em Base64 desnecessariamente.
+      const initialPhoto = (originalPhotoRef.current || '').trim();
+      const currentPhoto = (selectedMember.photoUrl || '').trim();
+      const isPhotoModified = currentPhoto !== initialPhoto;
+
+      if (!isPhotoModified) {
+        delete snakePayload.photo_url;
+      } else {
+        // Foto foi alterada: envia a nova foto em Base64 ou null se foi removida
+        snakePayload.photo_url = currentPhoto || null;
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .update(toSnake(selectedMember))
+        .update(snakePayload)
         .eq('id', selectedMember.id);
 
       if (error) {
-        alert('Erro ao salvar: ' + error.message);
+        console.error('Erro ao salvar alterações do membro:', error);
+        showToast('Não foi possível salvar as alterações. Tente novamente.', 'error');
       } else {
         onUpdateMembers(members.map(m => m.id === selectedMember.id ? selectedMember : m));
         setIsEditModalOpen(false);
+        showToast('Cadastro atualizado com sucesso!', 'success');
       }
+    } catch (err: any) {
+      console.error('Exceção ao salvar membro:', err);
+      showToast('Erro de conexão ao salvar alterações. Tente novamente.', 'error');
+    } finally {
+      isSavingRef.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -254,6 +289,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-6">
+      <ToastContainer />
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-primary">Gestão de Membros</h1>
@@ -427,12 +463,33 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       {/* Modal de Edição */}
       <Modal
         isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
+        onClose={() => {
+          if (!isSaving) setIsEditModalOpen(false);
+        }}
         title="Editar Cadastro Completo"
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveEdit}>Salvar Alterações</Button>
+            <Button 
+              variant="outline" 
+              onClick={() => setIsEditModalOpen(false)}
+              disabled={isSaving}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleSaveEdit}
+              disabled={isSaving}
+              className="min-w-[160px] flex items-center justify-center gap-2"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                'Salvar Alterações'
+              )}
+            </Button>
           </div>
         }
       >
