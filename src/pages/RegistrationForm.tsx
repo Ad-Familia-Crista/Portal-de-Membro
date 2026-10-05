@@ -225,6 +225,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const isSubmittingRef = React.useRef(false);
   // Controle para inicializar o formulário apenas uma vez na carga do perfil
   const hasInitializedRef = React.useRef(false);
+  // Valor original da foto no momento da abertura do formulário.
+  // Usado para detectar se a foto foi alterada e evitar reenvio desnecessário do Base64.
+  const originalPhotoRef = React.useRef<string>(user?.photoUrl || '');
 
   // Cache em memória para verificações de CPF instantâneas sem bater repetidamente no banco
   const verifiedCpfsCacheRef = React.useRef<Map<string, string | null>>(new Map());
@@ -566,12 +569,33 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         console.warn('[CADASTRO] Não foi possível calcular o tamanho do payload:', err);
       }
 
-      // 4. Execução do UPDATE no Supabase
+      // 4. Controle da foto: não enviar photo_url se não foi alterada.
+      // Cenario A/C: foto igual ao original ou ambas vazias → omite do payload.
+      // Cenario B: nova foto selecionada → envia o novo Base64.
+      // Cenario D: remocao explicitamente pelo usuario (valor vazio, original tinha Base64) → envia '' para limpar.
+      const payloadData = { ...formattedData };
+      if (payloadData.photoUrl === originalPhotoRef.current) {
+        delete payloadData.photoUrl;
+        console.log('[CADASTRO] photo_url omitida do payload (sem alteracao).');
+      } else {
+        const photoKbSent = payloadData.photoUrl
+          ? (new Blob([payloadData.photoUrl]).size / 1024).toFixed(1)
+          : '0';
+        console.log(`[CADASTRO] photo_url incluida no payload: ${photoKbSent !== '0' ? `${photoKbSent} KB` : 'removida (vazia)'}`);
+      }
+
+      // 5. Execucao do UPDATE no Supabase
       console.log('[CADASTRO] Antes do update Supabase');
       const tSupabaseStart = performance.now();
-      await updateUser(formattedData);
+      await updateUser(payloadData);
       const tSupabaseEnd = performance.now();
       console.log(`[CADASTRO] Supabase respondeu com sucesso: ${(tSupabaseEnd - tSupabaseStart).toFixed(1)} ms`);
+
+      // 6. Se a foto foi enviada com sucesso, atualiza a referencia original
+      // para que um segundo salvamento sem nova alteracao tambem omita corretamente.
+      if (payloadData.photoUrl !== undefined) {
+        originalPhotoRef.current = payloadData.photoUrl;
+      }
 
       // 5. Confirmação real do banco obtida com sucesso:
       showToast('Cadastro atualizado com sucesso!', 'success');

@@ -397,29 +397,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     delete snakeData.id;
     delete snakeData.email;
 
-    const { data: updatedProfile, error } = await supabase
+    // UPDATE sem retorno do perfil completo: evita download desnecessário do Base64 da foto.
+    // O status HTTP 204 (No Content) confirma o sucesso da operação.
+    const { error } = await supabase
       .from('profiles')
       .update(snakeData)
-      .eq('id', user.id)
-      .select()
-      .single();
+      .eq('id', user.id);
 
     if (error) {
       console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', error);
       throw error;
     }
 
-    if (!updatedProfile) {
-      const notFoundError = new Error('Nenhum registro foi atualizado no banco de dados.');
-      console.error('[CADASTRO]', notFoundError);
-      throw notFoundError;
-    }
-
     // 2) SOMENTE após a confirmação real do banco de dados:
-    const camelUpdated = toCamel(updatedProfile) as Member;
+    // Constrói o estado local a partir dos dados que já temos — sem depender do retorno do Supabase.
+    // 'data' está em camelCase (vem do formulário já formatado).
+    // A mesclagem garante que campos como id, email, role e ministerialHistory não sejam perdidos.
     const finalUser: Member = {
       ...user,
-      ...camelUpdated,
+      ...data,
       validUntil: updatedUser.validUntil,
       lastUpdated: updatedUser.lastUpdated
     };
