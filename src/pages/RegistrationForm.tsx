@@ -217,6 +217,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const [childCpfDbErrors, setChildCpfDbErrors] = React.useState<Record<number, string>>({});
   const [childCpfValidating, setChildCpfValidating] = React.useState<Record<number, boolean>>({});
   const childCpfTimersRef = React.useRef<Record<number, any>>({});
+  // Controle de concorrência por filho (last-write-wins): apenas a validação mais recente altera o estado
+  const cpfRequestIdRef = React.useRef<Record<number, number>>({});
   const [cropperOpen, setCropperOpen] = React.useState(false);
   const [tempImageSrc, setTempImageSrc] = React.useState<string | null>(null);
   const [showConventionTooltip, setShowConventionTooltip] = React.useState(false);
@@ -376,6 +378,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     if (hasChildren === 'Não' && step === 2) {
       setValue('children', []);
       setChildCpfDbErrors({});
+      setChildCpfValidating({});
+      Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+      childCpfTimersRef.current = {};
+      cpfRequestIdRef.current = {};
     }
   }, [hasChildren, setValue, step]);
 
@@ -392,7 +398,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
 
     // 1. Verificar duplicidade no próprio formulário em 0ms
-    const currentChildren = watchChildren || [];
+    const currentChildren = getValues('children') || watchChildren || [];
     for (let i = 0; i < currentChildren.length; i++) {
       if (i !== childIndex && (currentChildren[i]?.cpf || '').replace(/\D/g, '') === clean) {
         return 'CPF já cadastrado';
@@ -454,22 +460,80 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   };
 
   const handleChildCpfBlur = async (cpf: string, index: number) => {
-    if (!cpf) return;
+    // Se o campo for esvaziado, invalida validações pendentes e limpa estados
+    if (!cpf) {
+      const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+      cpfRequestIdRef.current[index] = reqId;
+      if (childCpfTimersRef.current[index]) {
+        clearTimeout(childCpfTimersRef.current[index]);
+        delete childCpfTimersRef.current[index];
+      }
+      setChildCpfValidating(prev => {
+        if (!prev[index]) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+      setChildCpfDbErrors(prev => {
+        if (!prev[index]) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+      return;
+    }
+
     const clean = cpf.replace(/\D/g, '');
     if (clean.length < 11) {
       if (clean.length > 0) {
+        const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+        cpfRequestIdRef.current[index] = reqId;
+        if (childCpfTimersRef.current[index]) {
+          clearTimeout(childCpfTimersRef.current[index]);
+          delete childCpfTimersRef.current[index];
+        }
+        setChildCpfValidating(prev => {
+          if (!prev[index]) return prev;
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
         setChildCpfDbErrors(prev => ({ ...prev, [index]: 'CPF incompleto (11 dígitos)' }));
       }
       return;
     }
 
+    // Cancela o timer pendente do onChange (se houver) para evitar disparo duplicado
     if (childCpfTimersRef.current[index]) {
       clearTimeout(childCpfTimersRef.current[index]);
+      delete childCpfTimersRef.current[index];
     }
 
-    // Se já estiver no cache, exibe imediatamente
+    // Validação matemática em 0ms
+    if (!isValidCPF(clean)) {
+      const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+      cpfRequestIdRef.current[index] = reqId;
+      setChildCpfValidating(prev => {
+        if (!prev[index]) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+      setChildCpfDbErrors(prev => ({ ...prev, [index]: 'CPF inválido' }));
+      return;
+    }
+
+    // Se já estiver no cache local, exibe imediatamente em 0ms
     if (verifiedCpfsCacheRef.current.has(clean)) {
+      const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+      cpfRequestIdRef.current[index] = reqId;
       const cached = verifiedCpfsCacheRef.current.get(clean);
+      setChildCpfValidating(prev => {
+        if (!prev[index]) return prev;
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
       setChildCpfDbErrors(prev => {
         const next = { ...prev };
         if (cached) next[index] = cached;
@@ -479,19 +543,36 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       return;
     }
 
-    // Se já estiver validando via inFlight, apenas aguarda sem duplicar
+    // Inicia nova validação com novo requestId
+    const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+    cpfRequestIdRef.current[index] = reqId;
+
     setChildCpfValidating(prev => ({ ...prev, [index]: true }));
     const errorMsg = await validateChildCpfInDatabase(cpf, index);
-    setChildCpfValidating(prev => ({ ...prev, [index]: false }));
-    setChildCpfDbErrors(prev => {
-      const next = { ...prev };
-      if (errorMsg) {
-        next[index] = errorMsg;
-      } else {
+
+    // Proteção tripla contra race condition:
+    // 1) requestId ainda é o mais recente para este índice?
+    // 2) O valor atual no formulário ainda é o CPF que foi validado?
+    const currentChildren = getValues('children') || [];
+    const currentChildCpf = (currentChildren[index]?.cpf || '').replace(/\D/g, '');
+
+    if (cpfRequestIdRef.current[index] === reqId && currentChildCpf === clean) {
+      setChildCpfValidating(prev => {
+        if (!prev[index]) return prev;
+        const next = { ...prev };
         delete next[index];
-      }
-      return next;
-    });
+        return next;
+      });
+      setChildCpfDbErrors(prev => {
+        const next = { ...prev };
+        if (errorMsg) {
+          next[index] = errorMsg;
+        } else {
+          delete next[index];
+        }
+        return next;
+      });
+    }
   };
 
   const handleCEPChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -682,10 +763,14 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
       // Validação estrita e amigável da Etapa 2
       if (step === 2) {
-        // Se houver algum erro de CPF já detectado e ativo, impede o avanço imediatamente
-        const currentDbErrors = Object.values(childCpfDbErrors).filter(Boolean);
-        if (currentDbErrors.length > 0) {
-          showToast(currentDbErrors[0], 'error');
+        // Se houver algum erro de CPF já detectado e ativo para um filho existente, impede o avanço
+        const validChildIndices = new Set(currentChildren.map((_, i) => i));
+        const activeDbErrors = Object.entries(childCpfDbErrors)
+          .filter(([idx, err]) => validChildIndices.has(Number(idx)) && Boolean(err))
+          .map(([, err]) => err);
+
+        if (activeDbErrors.length > 0) {
+          showToast(activeDbErrors[0], 'error');
           return;
         }
 
@@ -705,6 +790,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
           // Só executa se houver dependente pendente de validação
           if (needsValidation) {
+            // Cancela timers pendentes para evitar concorrência com o nextStep
+            Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+            childCpfTimersRef.current = {};
+
             const checkPromises = currentChildren.map((ch, i) => validateChildCpfInDatabase(ch.cpf, i));
             const checkResults = await Promise.all(checkPromises);
             const newDbErrors: Record<number, string> = {};
@@ -719,6 +808,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
               }
             }
             setChildCpfDbErrors(newDbErrors);
+            setChildCpfValidating({});
 
             if (dbErrorFound) {
               return;
@@ -976,20 +1066,32 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             <button 
                               type="button" 
                               onClick={() => {
-                                if (childCpfTimersRef.current[index]) {
-                                  clearTimeout(childCpfTimersRef.current[index]);
-                                }
-                                removeChild(index);
+                                // 1. Cancela todos os timers pendentes
+                                Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+                                childCpfTimersRef.current = {};
+
+                                // 2. Invalida todos os request IDs para descartar qualquer requisição em voo iniciada antes da remoção
+                                cpfRequestIdRef.current = {};
+
+                                // 3. Reindexa os erros no banco deslocando os índices superiores
                                 setChildCpfDbErrors(prev => {
-                                  const next = { ...prev };
-                                  delete next[index];
+                                  const next: Record<number, string> = {};
+                                  Object.entries(prev).forEach(([k, msg]) => {
+                                    const i = Number(k);
+                                    if (i < index) {
+                                      next[i] = msg;
+                                    } else if (i > index) {
+                                      next[i - 1] = msg;
+                                    }
+                                  });
                                   return next;
                                 });
-                                setChildCpfValidating(prev => {
-                                  const next = { ...prev };
-                                  delete next[index];
-                                  return next;
-                                });
+
+                                // 4. Limpa estado de validação para evitar spinners presos
+                                setChildCpfValidating({});
+
+                                // 5. Remove o filho do formulário
+                                removeChild(index);
                               }} 
                               className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded cursor-pointer transition-colors flex items-center gap-1 text-xs font-medium"
                               title="Remover dependente"
@@ -1024,32 +1126,80 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                                       cpfField.onChange(val);
                                       const clean = val.replace(/\D/g, '');
 
-                                      if (childCpfDbErrors[index]) {
-                                        setChildCpfDbErrors(prev => {
+                                      // 1. Invalida imediatamente qualquer validação pendente ou em andamento deste filho
+                                      const reqId = (cpfRequestIdRef.current[index] || 0) + 1;
+                                      cpfRequestIdRef.current[index] = reqId;
+
+                                      // 2. Cancela qualquer timer pendente para este filho
+                                      if (childCpfTimersRef.current[index]) {
+                                        clearTimeout(childCpfTimersRef.current[index]);
+                                        delete childCpfTimersRef.current[index];
+                                      }
+
+                                      // 3. Limpa imediatamente erro anterior deste filho (se houver)
+                                      setChildCpfDbErrors(prev => {
+                                        if (!prev[index]) return prev;
+                                        const next = { ...prev };
+                                        delete next[index];
+                                        return next;
+                                      });
+
+                                      // 4. Se tiver menos de 11 dígitos, encerra qualquer estado de validação
+                                      if (clean.length < 11) {
+                                        setChildCpfValidating(prev => {
+                                          if (!prev[index]) return prev;
                                           const next = { ...prev };
                                           delete next[index];
                                           return next;
                                         });
+                                        return;
                                       }
 
-                                      if (childCpfTimersRef.current[index]) {
-                                        clearTimeout(childCpfTimersRef.current[index]);
-                                      }
+                                      // 5. Se já tiver 11 dígitos, inicia validação antecipada em background (debounce de 100ms)
+                                      // Ativa o estado de validação para fornecer feedback visual imediato
+                                      setChildCpfValidating(prev => ({ ...prev, [index]: true }));
 
-                                      // Quando atinge os 11 dígitos, inicia validação antecipada em background (debounce rápido 100ms)
-                                      if (clean.length === 11) {
-                                        childCpfTimersRef.current[index] = setTimeout(async () => {
-                                          setChildCpfValidating(prev => ({ ...prev, [index]: true }));
-                                          const errorMsg = await validateChildCpfInDatabase(val, index);
-                                          setChildCpfValidating(prev => ({ ...prev, [index]: false }));
-                                          setChildCpfDbErrors(prev => {
+                                      childCpfTimersRef.current[index] = setTimeout(async () => {
+                                        // Validação matemática imediata (0ms)
+                                        if (!isValidCPF(clean)) {
+                                          if (cpfRequestIdRef.current[index] === reqId) {
+                                            setChildCpfValidating(prev => {
+                                              if (!prev[index]) return prev;
+                                              const next = { ...prev };
+                                              delete next[index];
+                                              return next;
+                                            });
+                                            setChildCpfDbErrors(prev => ({ ...prev, [index]: 'CPF inválido' }));
+                                          }
+                                          return;
+                                        }
+
+                                        const errorMsg = await validateChildCpfInDatabase(val, index);
+
+                                        // Proteção tripla contra race condition:
+                                        // 1) requestId ainda é o mais recente para este índice?
+                                        // 2) O valor atual no formulário ainda é o CPF que foi validado?
+                                        const currentChildren = getValues('children') || [];
+                                        const currentChildCpf = (currentChildren[index]?.cpf || '').replace(/\D/g, '');
+
+                                        if (cpfRequestIdRef.current[index] === reqId && currentChildCpf === clean) {
+                                          setChildCpfValidating(prev => {
+                                            if (!prev[index]) return prev;
                                             const next = { ...prev };
-                                            if (errorMsg) next[index] = errorMsg;
-                                            else delete next[index];
+                                            delete next[index];
                                             return next;
                                           });
-                                        }, 100);
-                                      }
+                                          setChildCpfDbErrors(prev => {
+                                            const next = { ...prev };
+                                            if (errorMsg) {
+                                              next[index] = errorMsg;
+                                            } else {
+                                              delete next[index];
+                                            }
+                                            return next;
+                                          });
+                                        }
+                                      }, 100);
                                     }}
                                     onBlur={(e) => {
                                       cpfField.onBlur();
