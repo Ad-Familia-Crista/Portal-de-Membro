@@ -205,6 +205,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return promise;
   }, []);
 
+  // Contador de época de autenticação: incrementado a cada SIGNED_IN.
+  // Permite que o handler do SIGNED_OUT verifique se a sessão que iniciou a operação
+  // ainda é a atual — protegendo contra um SIGNED_OUT atrasado sobrescrever o segundo login.
+  const authEpochRef = React.useRef(0);
+
   React.useEffect(() => {
     let isMounted = true;
     let initialAuthResolved = false;
@@ -242,23 +247,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (session?.user) {
+          // Incrementa a época ao receber uma sessão válida (SIGNED_IN / INITIAL_SESSION / TOKEN_REFRESHED)
+          // Qualquer evento SIGNED_OUT que carregue uma época anterior será descartado.
+          authEpochRef.current += 1;
+          const epochAtStart = authEpochRef.current;
+
           const profile = await fetchProfile(session.user.id);
-          if (isMounted) {
-            if (profile) {
-              setUser(profile);
-            } else {
-              // Fallback: perfil mínimo caso o registro ainda não exista no banco
-              setUser(prev => prev || ({
-                id: session.user.id,
-                email: session.user.email || '',
-                role: 'MEMBER',
-                status: 'ACTIVE',
-                firstName: session.user.user_metadata?.first_name || session.user.email?.split('@')[0] || 'Membro'
-              } as Member));
-            }
+
+          // Descarta o resultado se um SIGNED_IN mais recente já foi processado
+          if (!isMounted || authEpochRef.current !== epochAtStart) return;
+
+          if (profile) {
+            setUser(profile);
+          } else {
+            // Fallback: perfil mínimo caso o registro ainda não exista no banco
+            setUser(prev => prev || ({
+              id: session.user.id,
+              email: session.user.email || '',
+              role: 'MEMBER',
+              status: 'ACTIVE',
+              firstName: session.user.user_metadata?.first_name || session.user.email?.split('@')[0] || 'Membro'
+            } as Member));
           }
         } else {
-          if (isMounted) setUser(null);
+          // SIGNED_OUT: só limpa o usuário se não há uma sessão mais nova em curso.
+          // Isso evita que um SIGNED_OUT atrasado do logout anterior sobrescreva o segundo login.
+          if (isMounted && authEpochRef.current === 0) {
+            setUser(null);
+          } else if (isMounted) {
+            // Há uma sessão mais nova (authEpoch > 0): ignora este SIGNED_OUT tardio
+            // e limpa a época para que o próximo SIGNED_OUT legítimo seja processado.
+            authEpochRef.current = 0;
+          }
         }
 
         finishLoading();
@@ -362,12 +382,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
 
     try {
-      // Dispara o encerramento de sessão no Supabase em segundo plano (background) sem bloquear a UI
-      supabase.auth.signOut().catch(error => {
-        console.warn('Erro assíncrono ao encerrar sessão no Supabase:', error);
-      });
+      // Aguarda o signOut() para garantir que o evento SIGNED_OUT do Supabase seja processado
+      // ANTES que o usuário tente um novo login. Se o signOut for disparado em background (fire-and-forget),
+      // o evento SIGNED_OUT pode chegar DEPOIS do SIGNED_IN da segunda conta e sobrescrever setUser(null),
+      // travando ou limpando a sessão recém-criada.
+      await supabase.auth.signOut();
     } catch (error) {
-      console.error('Erro ao disparar encerramento de sessão no Supabase:', error);
+      console.warn('Erro ao encerrar sessão no Supabase:', error);
     }
   };
 
