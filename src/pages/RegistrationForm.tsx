@@ -79,6 +79,7 @@ const schema = z.object({
   departments: z.array(z.string()).optional(),
   currentPosition: z.string().optional(),
   positionStartDate: z.string().optional(),
+  departmentStartDate: z.string().optional(),
   consecratedTo: z.string().optional(),
   consecrationDate: z.string().optional(),
   ministerialHistory: z.array(z.object({
@@ -183,6 +184,47 @@ const toDisplayMonthYear = (val?: string | null): string => {
   return str;
 };
 
+interface RegistrationDraftData {
+  userId: string;
+  step: number;
+  savedAt: string;
+  fields: Record<string, any>;
+}
+
+// Sanitização estrita do rascunho em conformidade com segurança e LGPD
+const sanitizeDraftValues = (data: any) => {
+  if (!data || typeof data !== 'object') return {};
+  const {
+    // 1. NUNCA salvar dados de identificação sensíveis (já vêm protegidos do perfil)
+    cpf,
+    rg,
+    // 2. NUNCA salvar fotos em Base64 no localStorage (pesadas e de alto risco de cota)
+    photoUrl,
+    // 3. NUNCA salvar credenciais ou senhas
+    password,
+    token,
+    // 4. Campos administrativos ou metadados de sistema
+    ministerialHistory,
+    validUntil,
+    lastUpdated,
+    id,
+    role,
+    status,
+    ...safeFields
+  } = data;
+
+  // 5. NUNCA salvar CPF de dependentes/menores de idade no navegador
+  if (Array.isArray(safeFields.children)) {
+    safeFields.children = safeFields.children.map((child: any) => {
+      if (!child || typeof child !== 'object') return child;
+      const { cpf: childCpf, ...safeChild } = child;
+      return safeChild;
+    });
+  }
+
+  return safeFields;
+};
+
 interface RegistrationFormProps {
   onComplete?: () => void;
 }
@@ -190,6 +232,9 @@ interface RegistrationFormProps {
 export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }) => {
   const { user, updateUser } = useAuth();
   const { showToast, ToastContainer } = useToast();
+  // Rascunho não finalizado pendente de decisão do usuário
+  const [draftToRecover, setDraftToRecover] = React.useState<RegistrationDraftData | null>(null);
+
   // Restaurar etapa salva no localStorage
   const [step, setStepState] = React.useState<number>(() => {
     try {
@@ -237,6 +282,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const inFlightCpfPromisesRef = React.useRef<Map<string, Promise<string | null>>>(new Map());
 
   const isAdminOrSecretary = user?.role === 'ADMIN' || user?.role === 'SECRETARY';
+  const [customDeptInput, setCustomDeptInput] = React.useState('');
 
   const { register, handleSubmit, watch, setValue, control, trigger, getValues, formState: { errors }, reset } = useForm({
     resolver: zodResolver(schema),
@@ -284,6 +330,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       })) || [],
       phones: user?.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
       departments: user?.departments || [],
+      departmentStartDate: user?.departmentStartDate || '',
       currentPosition: user?.currentPosition || 'Membro',
       positionStartDate: user?.positionStartDate || new Date().toISOString().split('T')[0],
       ministerialHistory: user?.ministerialHistory || [],
@@ -341,6 +388,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         })) || [],
         phones: user.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
         departments: user.departments || [],
+        departmentStartDate: user.departmentStartDate || '',
         currentPosition: user.currentPosition || 'Membro',
         positionStartDate: user.positionStartDate || new Date().toISOString().split('T')[0],
         ministerialHistory: user.ministerialHistory || [],
@@ -348,6 +396,79 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       });
     }
   }, [user, reset]);
+
+  // 1. Verificar se há rascunho seguro e recuperável isolado para esta conta
+  React.useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const draftKey = `draft_registration_${user.id}`;
+      const rawDraft = localStorage.getItem(draftKey);
+      if (!rawDraft) return;
+
+      const draft: RegistrationDraftData = JSON.parse(rawDraft);
+      if (!draft || draft.userId !== user.id || !draft.savedAt || !draft.fields) {
+        return;
+      }
+
+      // Expiração do rascunho (7 dias)
+      const draftAgeMs = Date.now() - new Date(draft.savedAt).getTime();
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      if (draftAgeMs > SEVEN_DAYS_MS || isNaN(draftAgeMs)) {
+        localStorage.removeItem(draftKey);
+        return;
+      }
+
+      // Não sobrescrever se o banco de dados tiver alterações mais recentes que o rascunho
+      const userLastUpdatedMs = user.lastUpdated ? new Date(user.lastUpdated).getTime() : 0;
+      const draftSavedMs = new Date(draft.savedAt).getTime();
+      if (userLastUpdatedMs && userLastUpdatedMs >= draftSavedMs) {
+        localStorage.removeItem(draftKey);
+        return;
+      }
+
+      // Se houver campos preenchidos no rascunho, disponibiliza para o usuário decidir
+      if (Object.keys(draft.fields).length > 0) {
+        setDraftToRecover(draft);
+      }
+    } catch (err) {
+      console.warn('[RASCUNHO] Erro ao carregar rascunho do localStorage:', err);
+    }
+  }, [user?.id, user?.lastUpdated]);
+
+  const handleRecoverDraft = () => {
+    if (!draftToRecover) return;
+    const { fields, step: savedStep } = draftToRecover;
+
+    Object.entries(fields).forEach(([key, value]) => {
+      if (key === 'children' && Array.isArray(value)) {
+        const currentChildren = getValues('children') || [];
+        const mergedChildren = value.map((child: any, idx: number) => ({
+          ...child,
+          cpf: currentChildren[idx]?.cpf || child.cpf || '',
+        }));
+        setValue('children', mergedChildren, { shouldDirty: true });
+      } else if (value !== undefined && value !== null) {
+        setValue(key as any, value, { shouldDirty: true });
+      }
+    });
+
+    if (savedStep && savedStep >= 1 && savedStep <= totalSteps) {
+      setStep(savedStep);
+    }
+
+    setDraftToRecover(null);
+    showToast('Rascunho recuperado com sucesso!', 'info');
+  };
+
+  const handleDiscardDraft = () => {
+    if (user?.id) {
+      try {
+        localStorage.removeItem(`draft_registration_${user.id}`);
+      } catch {}
+    }
+    setDraftToRecover(null);
+    showToast('Rascunho descartado.', 'info');
+  };
 
   const { fields: childFields, append: appendChild, remove: removeChild } = useFieldArray({
     control,
@@ -365,6 +486,34 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const participatesInConvention = watch('participatesInConvention');
   const watchChildren = watch('children');
   const watchPhotoUrl = watch('photoUrl');
+  const watchedValues = watch();
+
+  // 2. Debounce de 2.5s para gravação segura e isolada do rascunho no localStorage
+  React.useEffect(() => {
+    if (!user?.id || !hasInitializedRef.current || isSubmittingForm || draftToRecover !== null) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      try {
+        const currentValues = getValues();
+        const safeFields = sanitizeDraftValues(currentValues);
+
+        const draftPayload: RegistrationDraftData = {
+          userId: user.id,
+          step,
+          savedAt: new Date().toISOString(),
+          fields: safeFields,
+        };
+
+        localStorage.setItem(`draft_registration_${user.id}`, JSON.stringify(draftPayload));
+      } catch (e) {
+        console.warn('[RASCUNHO] Erro ao salvar rascunho:', e);
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [watchedValues, step, user?.id, isSubmittingForm, draftToRecover]);
 
   // Limpeza de dados residuais para evitar erros de validação em campos escondidos
   React.useEffect(() => {
@@ -680,7 +829,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
       // 5. Confirmação real do banco obtida com sucesso:
       showToast('Cadastro atualizado com sucesso!', 'success');
-      try { localStorage.removeItem('portal_registration_step'); } catch {}
+      try {
+        if (user?.id) {
+          localStorage.removeItem(`draft_registration_${user.id}`);
+        }
+        localStorage.removeItem('portal_registration_step');
+      } catch {}
 
       const tTotal = performance.now();
       console.log(`[CADASTRO] Finalização - Tempo total do salvamento: ${(tTotal - tStart).toFixed(1)} ms`);
@@ -693,11 +847,45 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     } catch (error: any) {
       const tError = performance.now();
       console.error(`[CADASTRO] Erro detalhado ao salvar cadastro (${(tError - tStart).toFixed(1)} ms):`, error);
-      showToast(
-        'Não foi possível salvar seu cadastro. Seus dados continuam preenchidos. Verifique sua conexão e tente novamente.',
-        'error'
+
+      const msg = String(error?.message || '').toLowerCase();
+      const isAuthError = Boolean(
+        error?.isAuthError ||
+        error?.status === 401 ||
+        error?.statusCode === 401 ||
+        msg.includes('jwt') ||
+        msg.includes('token') ||
+        msg.includes('sessão') ||
+        msg.includes('session') ||
+        msg.includes('unauthorized') ||
+        msg.includes('pgrst301')
       );
-      // REGRA CRÍTICA: Não chamamos reset(), não chamamos onComplete(), mantendo os dados no formulário
+
+      const isNetworkError = Boolean(
+        !navigator.onLine ||
+        msg.includes('failed to fetch') ||
+        msg.includes('network') ||
+        msg.includes('conexão') ||
+        msg.includes('connection')
+      );
+
+      if (isAuthError) {
+        showToast(
+          'Sua sessão expirou ou precisa de renovação. Seus dados continuam preenchidos no formulário. Tente salvar novamente.',
+          'error'
+        );
+      } else if (isNetworkError) {
+        showToast(
+          'Falha na conexão com a internet. Seus dados continuam preenchidos. Verifique sua rede e tente novamente.',
+          'error'
+        );
+      } else {
+        showToast(
+          'Não foi possível salvar seu cadastro. Seus dados continuam preservados no formulário. Verifique as informações e tente novamente.',
+          'error'
+        );
+      }
+      // REGRA CRÍTICA: Não chamamos reset(), não chamamos onComplete(), mantendo os dados no formulário e o rascunho intacto
     } finally {
       isSubmittingRef.current = false;
       setIsSubmittingForm(false);
@@ -876,6 +1064,38 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
           animate={{ width: `${progress}%` }}
         />
       </div>
+
+      {draftToRecover && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900 shadow-sm mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 rounded-lg text-amber-700 shrink-0">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">Rascunho não finalizado encontrado</p>
+              <p className="text-xs text-amber-700">
+                Salvo em {toDisplayDate(draftToRecover.savedAt.split('T')[0])} às {new Date(draftToRecover.savedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Passo {draftToRecover.step} de {totalSteps}). Deseja restaurar os dados preenchidos?
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              className="px-3 py-1.5 text-xs font-semibold text-amber-800 hover:text-amber-950 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Descartar
+            </button>
+            <button
+              type="button"
+              onClick={handleRecoverDraft}
+              className="px-3.5 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              Recuperar Rascunho
+            </button>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-8">
         {step === 1 && (
@@ -1233,19 +1453,17 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             />
                           </div>
 
-                          {isAdminOrSecretary && (
-                            <div className="pt-2 space-y-2 border-t border-muted/10">
-                              <label className="text-xs font-bold text-black uppercase">Departamento Atual (Admin/Sec Only)</label>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                {CHILD_DEPARTMENTS.map(dept => (
-                                  <label key={dept} className="flex items-center gap-2 text-xs p-2 bg-white rounded border border-muted/10 cursor-pointer">
-                                    <input type="checkbox" value={dept} {...register(`children.${index}.departments`)} className="w-3 h-3 accent-black" />
-                                    {dept}
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                          <div className="pt-2 space-y-1.5 border-t border-muted/10">
+                            <label className="text-xs font-semibold text-black">Departamento da Criança</label>
+                            <select
+                              {...register(`children.${index}.departments.0`)}
+                              className="w-full p-2 rounded border border-muted/20 text-xs bg-white h-9 focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer"
+                            >
+                              {CHILD_DEPARTMENTS.map(dept => (
+                                <option key={dept} value={dept}>{dept}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       );
                     })}
@@ -1574,13 +1792,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted uppercase font-bold">Cargo Atual</p>
-                          <p className="text-sm font-bold text-black">{watch('currentPosition')}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Departamentos</p>
-                          <p className="text-sm font-bold text-black">
-                            {watch('departments')?.length > 0 ? watch('departments').join(', ') : 'Nenhum'}
-                          </p>
+                          <p className="text-sm font-bold text-black">{watch('currentPosition') || 'Membro'}</p>
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted uppercase font-bold">Tempo no Cargo</p>
@@ -1598,7 +1810,54 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             })()}
                           </p>
                         </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-muted uppercase font-bold">Consagrado a</p>
+                          <p className="text-sm font-bold text-black">{watch('consecratedTo') || 'Não informado'}</p>
+                        </div>
                       </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-black/10">
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-muted uppercase font-bold">Departamento(s)</p>
+                          <p className="text-sm font-bold text-black">
+                            {watch('departments')?.length > 0 ? watch('departments').join(', ') : 'Nenhum Departamento'}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-muted uppercase font-bold">Data de Entrada no Depto.</p>
+                          <p className="text-sm font-bold text-black">
+                            {watch('departmentStartDate')
+                              ? watch('departmentStartDate').split('-').reverse().join('/')
+                              : 'Não informada'}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-muted uppercase font-bold">Tempo no Departamento</p>
+                          <p className="text-sm font-bold text-black">
+                            {(() => {
+                              const deptStart = watch('departmentStartDate');
+                              if (!deptStart) return 'N/A';
+                              const start = new Date(deptStart);
+                              const now = new Date();
+                              const diffMs = now.getTime() - start.getTime();
+                              const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                              const years = Math.floor(totalDays / 365);
+                              const months = Math.floor((totalDays % 365) / 30);
+                              const days = totalDays % 30;
+                              return `${years > 0 ? `${years} ano(s) ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`.trim() || 'Recente';
+                            })()}
+                          </p>
+                        </div>
+                      </div>
+
+                      {watch('consecrationDate') && (
+                        <div className="pt-2 border-t border-black/10">
+                          <p className="text-[10px] text-muted uppercase font-bold">Data da Consagração</p>
+                          <p className="text-sm font-bold text-black">
+                            {watch('consecrationDate').split('-').reverse().join('/')}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-4 pt-4 border-t border-muted/5">
@@ -1666,13 +1925,75 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                     <div className="space-y-1.5">
                       <label className="text-sm font-semibold text-black">Departamento Atual (Múltipla escolha)</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                        {DEPARTMENTS.map(dept => (
+                        {[
+                          ...DEPARTMENTS,
+                          ...(watch('departments') || []).filter((d: string) => !DEPARTMENTS.includes(d) && d !== '')
+                        ].map(dept => (
                           <label key={dept} className="flex items-center gap-2 text-xs p-2 bg-background/50 rounded border border-muted/10 cursor-pointer">
                             <input type="checkbox" value={dept} {...register('departments')} className="w-3 h-3 accent-black" />
                             {dept}
                           </label>
                         ))}
                       </div>
+                      {/* Campo para adicionar departamento personalizado */}
+                      <div className="flex gap-2 mt-2">
+                        <input
+                          type="text"
+                          placeholder="Adicionar outro departamento..."
+                          value={customDeptInput}
+                          onChange={(e) => setCustomDeptInput(e.target.value)}
+                          className="flex-1 p-2 rounded border border-muted/20 text-xs"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && customDeptInput.trim()) {
+                              e.preventDefault();
+                              const trimmed = customDeptInput.trim();
+                              const current = watch('departments') || [];
+                              if (!current.includes(trimmed)) {
+                                setValue('departments', [...current, trimmed]);
+                              }
+                              setCustomDeptInput('');
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const trimmed = customDeptInput.trim();
+                            const current = watch('departments') || [];
+                            if (trimmed && !current.includes(trimmed)) {
+                              setValue('departments', [...current, trimmed]);
+                            }
+                            setCustomDeptInput('');
+                          }}
+                          className="px-3 py-1.5 bg-black text-white text-xs font-bold rounded hover:bg-black/80 whitespace-nowrap"
+                        >
+                          + Adicionar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Data de Entrada no Departamento */}
+                    <div className="pt-3 border-t border-muted/10">
+                      <label className="text-sm font-semibold text-black block mb-1">Data de Entrada no Departamento</label>
+                      <input 
+                        type="date" 
+                        {...register('departmentStartDate')}
+                        className="w-full sm:w-1/2 p-2 rounded border border-muted/20 text-sm h-10 focus:outline-none focus:ring-2 focus:ring-black/30"
+                      />
+                      {watch('departmentStartDate') && (
+                        <p className="text-xs text-muted mt-1">
+                          {(() => {
+                            const start = new Date(watch('departmentStartDate'));
+                            const now = new Date();
+                            const diffMs = now.getTime() - start.getTime();
+                            const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                            const years = Math.floor(totalDays / 365);
+                            const months = Math.floor((totalDays % 365) / 30);
+                            const days = totalDays % 30;
+                            return `Tempo no departamento: ${years > 0 ? `${years} ano(s) e ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`;
+                          })()}
+                        </p>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-muted/5">

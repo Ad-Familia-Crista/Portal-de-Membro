@@ -381,6 +381,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('auth_user');
     setIsLoading(false);
 
+    // Limpeza de rascunhos expirados ao deslogar (mantém rascunhos válidos para caso o usuário retorne à mesma conta)
+    try {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('draft_registration_')) {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            if (!parsed.savedAt || (Date.now() - new Date(parsed.savedAt).getTime() > 7 * 24 * 60 * 60 * 1000)) {
+              localStorage.removeItem(key);
+            }
+          }
+        }
+      });
+    } catch {}
+
     try {
       // Aguarda o signOut() para garantir que o evento SIGNED_OUT do Supabase seja processado
       // ANTES que o usuário tente um novo login. Se o signOut for disparado em background (fire-and-forget),
@@ -395,6 +410,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateUser = async (data: Partial<Member>) => {
     if (!user) return;
     
+    // 1) Verificar e renovar sessão antes do UPDATE caso tenha expirado durante preenchimento prolongado
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session) {
+        const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr || !refreshed?.session) {
+          const authErr: any = new Error('Sessão expirada. Faça login novamente ou tente salvar.');
+          authErr.isAuthError = true;
+          authErr.status = 401;
+          throw authErr;
+        }
+      }
+    } catch (err: any) {
+      if (err.isAuthError) throw err;
+      console.warn('[CADASTRO] Falha ao verificar/renovar sessão antes do update:', err);
+    }
+
     const now = new Date();
     // Validade de 1 ano e 6 meses após a atualização
     const validUntilDate = new Date(now);
@@ -407,7 +439,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       validUntil: validUntilDate.toISOString().split('T')[0]
     };
 
-    // 1) Persiste no Supabase PRIMEIRO (sem atualização otimista prematura)
+    // 2) Persiste no Supabase PRIMEIRO (sem atualização otimista prematura)
     const snakeData = toSnake({
       ...data,
       lastUpdated: updatedUser.lastUpdated,
@@ -427,6 +459,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) {
       console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', error);
+      const msg = (error.message || '').toLowerCase();
+      if (error.code === 'PGRST301' || msg.includes('jwt') || msg.includes('token') || msg.includes('expired') || (error as any).status === 401) {
+        const authErr: any = new Error('Sessão expirada no banco');
+        authErr.isAuthError = true;
+        authErr.status = 401;
+        authErr.originalError = error;
+        throw authErr;
+      }
       throw error;
     }
 

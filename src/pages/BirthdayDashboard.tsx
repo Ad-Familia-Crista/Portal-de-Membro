@@ -18,6 +18,7 @@ import {
   ToggleRight,
   AlertCircle
 } from 'lucide-react';
+import { exportMultiSectionReport } from '../services/excel/excelExportService';
 
 interface BirthdayDashboardProps {
   members: Member[];
@@ -116,55 +117,56 @@ export const BirthdayDashboard: React.FC<BirthdayDashboardProps> = ({ members, l
     });
   }, [members, onlyActive, monthFilter, searchTerm]);
 
-  const handleExportExcel = () => {
-    const reportData: string[][] = [
-      ['ADFC - RELATÓRIO DE ANIVERSARIANTES', monthFilter === -1 ? 'ANO TODO' : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`],
-      [`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`],
-      [],
-      ['1. ANIVERSARIANTES DE NASCIMENTO'],
-      ['Nome Completo', 'Data de Nascimento', 'Dia/Mês', 'WhatsApp/Celular'],
-      ...birthdaysInMonth.map(m => {
-        const dateParsed = parseDateToMonthDayYear(m.birthDate);
-        return [
-          `${m.firstName || ''} ${m.lastName || ''}`.trim(),
-          m.birthDate || '',
-          dateParsed ? `${String(dateParsed.day).padStart(2,'0')}/${String(dateParsed.month + 1).padStart(2,'0')}` : '?',
-          m.cell || ''
-        ];
-      }),
-      [],
-      ['2. ANIVERSÁRIOS DE CASAMENTO'],
-      ['Casal', 'Data de Casamento', 'Dia/Mês', 'Anos de União', 'Celular de Contato'],
-      ...weddingsInMonth.map(m => {
-        const dateParsed = parseDateToMonthDayYear(m.marriageDate!);
-        const marriageYear = dateParsed ? dateParsed.year : yearFilter;
-        return [
-          `${m.firstName || ''} e ${m.spouseName || ''}`,
-          m.marriageDate || '',
-          dateParsed ? `${String(dateParsed.day).padStart(2,'0')}/${String(dateParsed.month + 1).padStart(2,'0')}` : '?',
-          `${yearFilter - marriageYear} anos`,
-          m.cell || ''
-        ];
-      })
-    ];
-
-    const csvContent = reportData
-      .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(';'))
-      .join('\r\n');
-    
-    // BOM UTF-8 para Excel no Windows reconhecer a codificação corretamente
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    
+  const handleExportExcel = async () => {
     const fileMonthName = monthFilter === -1 ? 'anual' : months[monthFilter].toLowerCase();
-    link.setAttribute('download', `aniversariantes_${fileMonthName}_${yearFilter}.csv`);
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const periodLabel = monthFilter === -1 ? `ANO DE ${yearFilter}` : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`;
+
+    const birthRows = birthdaysInMonth.map(m => {
+      const dateParsed = parseDateToMonthDayYear(m.birthDate);
+      const birthFormatted = m.birthDate ? m.birthDate.split('-').reverse().join('/') : '';
+      const dayMonth = dateParsed ? `${String(dateParsed.day).padStart(2, '0')}/${String(dateParsed.month + 1).padStart(2, '0')}` : '';
+      return [
+        `${m.firstName || ''} ${m.lastName || ''}`.trim(),
+        birthFormatted,
+        dayMonth,
+        m.cell || ''
+      ];
+    });
+
+    const weddingRows = weddingsInMonth.map(m => {
+      const dateParsed = parseDateToMonthDayYear(m.marriageDate!);
+      const marriageYear = dateParsed ? dateParsed.year : yearFilter;
+      const weddingFormatted = m.marriageDate ? m.marriageDate.split('-').reverse().join('/') : '';
+      const dayMonth = dateParsed ? `${String(dateParsed.day).padStart(2, '0')}/${String(dateParsed.month + 1).padStart(2, '0')}` : '';
+      return [
+        `${m.firstName || ''} e ${m.spouseName || ''}`,
+        weddingFormatted,
+        dayMonth,
+        `${yearFilter - marriageYear} anos`,
+        m.cell || ''
+      ];
+    });
+
+    await exportMultiSectionReport({
+      fileName: `aniversariantes_${fileMonthName}_${yearFilter}.xlsx`,
+      sheetName: 'Aniversariantes',
+      title: 'ADFC — Relatório de Aniversariantes',
+      subTitle: `Período: ${periodLabel} | Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
+      sections: [
+        {
+          title: '1. ANIVERSARIANTES DE NASCIMENTO',
+          headers: ['Nome Completo', 'Data de Nascimento', 'Dia / Mês', 'WhatsApp / Celular'],
+          rows: birthRows,
+          alignments: ['left', 'center', 'center', 'center'],
+        },
+        {
+          title: '2. ANIVERSÁRIOS DE CASAMENTO',
+          headers: ['Nome do Casal', 'Data do Casamento', 'Dia / Mês', 'Tempo de União', 'WhatsApp / Celular'],
+          rows: weddingRows,
+          alignments: ['left', 'center', 'center', 'center', 'center'],
+        }
+      ]
+    });
   };
 
   const totalWithBirthday = members.filter(m => !!m.birthDate).length;

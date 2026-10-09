@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
+import { exportTableToExcel } from '../services/excel/excelExportService';
 
 export const WorshipFrequencyPage: React.FC = () => {
   const { user } = useAuth();
@@ -331,7 +332,7 @@ export const WorshipFrequencyPage: React.FC = () => {
   };
 
   // ==========================================
-  // EXPORTAR EXCEL (.CSV formatado para Excel)
+  // EXPORTAR EXCEL (.XLSX PADRONIZADO ADFC)
   // ==========================================
   const handleExportExcel = async () => {
     try {
@@ -364,39 +365,60 @@ export const WorshipFrequencyPage: React.FC = () => {
         return;
       }
 
-      const headers = [
-        'Data do Culto',
-        'Tema do Culto',
-        'Preleitor',
-        'Visitantes',
-        'Crianças',
-        'Adultos',
-        'Presença Total'
-      ];
-
-      const rows = allRecords.map(r => {
-        const adults = Math.max(0, r.totalAttendance - (r.visitorsAttendance + (r.childrenAttendance || 0)));
-        return [
-          formatDateDisplay(r.cultDate),
-          r.theme || '',
-          r.speaker || '',
-          r.visitorsAttendance ?? 0,
-          r.childrenAttendance ?? 0,
-          adults,
-          r.totalAttendance ?? 0
-        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
+      await exportTableToExcel<WorshipFrequency>({
+        fileName: `frequencia_cultos_adfc_${new Date().toISOString().split('T')[0]}.xlsx`,
+        sheetName: 'Frequência dos Cultos',
+        title: 'ADFC — Registro Geral de Frequência de Cultos',
+        data: allRecords,
+        columns: [
+          { 
+            header: 'Data do Culto', 
+            key: 'cultDate', 
+            alignment: 'center', 
+            formatter: r => formatDateDisplay(r.cultDate) 
+          },
+          { 
+            header: 'Tema do Culto', 
+            key: 'theme', 
+            alignment: 'left', 
+            formatter: r => r.theme || '' 
+          },
+          { 
+            header: 'Preleitor', 
+            key: 'speaker', 
+            alignment: 'left', 
+            formatter: r => r.speaker || '' 
+          },
+          { 
+            header: 'Visitantes', 
+            key: 'visitorsAttendance', 
+            alignment: 'right', 
+            dataType: 'number', 
+            formatter: r => r.visitorsAttendance ?? 0 
+          },
+          { 
+            header: 'Crianças', 
+            key: 'childrenAttendance', 
+            alignment: 'right', 
+            dataType: 'number', 
+            formatter: r => r.childrenAttendance ?? 0 
+          },
+          { 
+            header: 'Adultos', 
+            key: 'adults', 
+            alignment: 'right', 
+            dataType: 'number', 
+            formatter: r => Math.max(0, r.totalAttendance - (r.visitorsAttendance + (r.childrenAttendance || 0))) 
+          },
+          { 
+            header: 'Presença Total', 
+            key: 'totalAttendance', 
+            alignment: 'right', 
+            dataType: 'number', 
+            formatter: r => r.totalAttendance ?? 0 
+          },
+        ],
       });
-
-      const csvContent = '\uFEFF' + [headers.join(';'), ...rows].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `frequencia_cultos_adfc_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error('Erro ao exportar Excel:', err);
       alert('Erro ao exportar registros para o Excel: ' + (err.message || err));

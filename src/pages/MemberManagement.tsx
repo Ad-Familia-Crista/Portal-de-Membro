@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, UserRole, DEPARTMENTS, CONSECRATIONS, POSITIONS, MinisterialEvent } from '../types';
+import { Member, UserRole, DEPARTMENTS, CHILD_DEPARTMENTS, CONSECRATIONS, POSITIONS, MinisterialEvent } from '../types';
 import {
   Search,
   Edit2,
@@ -26,6 +26,7 @@ import { toSnake, toCamel } from '../lib/mapper';
 import { optimizeImage } from '../lib/imageOptimizer';
 import { MemberTableSkeleton } from '../components/Skeletons';
 import { useToast } from '../components/Toast';
+import { exportTableToExcel } from '../services/excel/excelExportService';
 
 interface MemberManagementProps {
   members: Member[];
@@ -50,6 +51,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const isSavingRef = React.useRef(false);
   const originalPhotoRef = React.useRef<string>('');
   const [showHistoryForm, setShowHistoryForm] = React.useState(false);
+  const [customDeptInput, setCustomDeptInput] = React.useState('');
   const [eventData, setEventData] = React.useState<Partial<MinisterialEvent>>({
     type: 'PROMOÇÃO',
     description: '',
@@ -234,57 +236,52 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     }
   };
 
-  const handleExportExcel = () => {
-    if (filteredMembers.length === 0) return;
+  const handleExportExcel = async () => {
+    if (!isAdmin || filteredMembers.length === 0) return;
 
-    const headers = [
-      'Nome', 'Sobrenome', 'Email', 'Status', 'Nível de Acesso', 'Nascimento',
-      'CPF', 'RG', 'Celular', 'Endereço', 'Número', 'Bairro', 'Cidade', 'Estado', 'CEP',
-      'Estado Civil', 'Cônjuge', 'Data Casamento',
-      'Profissão', 'Escolaridade',
-      'Batizado', 'Batismo Espírito Santo', 'Data Entrada',
-      'Posição Atual', 'Departamentos'
-    ];
-
-    const csvContent = [
-      headers.join(';'),
-      ...filteredMembers.map(m => [
-        m.firstName || '',
-        m.lastName || '',
-        m.email || '',
-        m.status === 'ACTIVE' ? 'Ativo' : 'Inativo',
-        m.role || '',
-        m.birthDate ? m.birthDate.split('-').reverse().join('/') : '',
-        m.cpf || '',
-        m.rg || '',
-        m.cell || '',
-        m.address || '',
-        m.number || '',
-        m.neighborhood || '',
-        m.city || '',
-        m.state || '',
-        m.cep || '',
-        m.maritalStatus || '',
-        m.spouseName || '',
-        m.marriageDate ? m.marriageDate.split('-').reverse().join('/') : '',
-        m.profession || '',
-        m.education || '',
-        m.isBaptized ? 'Sim' : 'Não',
-        m.isHolySpiritBaptized ? 'Sim' : 'Não',
-        m.entryDate || '',
-        m.currentPosition || '',
-        (m.departments || []).join(', ')
-      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(';'))
-    ].join('\n');
-
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `gestao_membros_adfc_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    await exportTableToExcel({
+      fileName: `gestao_membros_adfc_${new Date().toISOString().split('T')[0]}.xlsx`,
+      sheetName: 'Gestão de Membros',
+      title: 'ADFC — Relatório de Gestão de Membros',
+      data: filteredMembers,
+      columns: [
+        { header: 'Nome', key: 'firstName', alignment: 'left', formatter: m => m.firstName || '' },
+        { header: 'Sobrenome', key: 'lastName', alignment: 'left', formatter: m => m.lastName || '' },
+        { header: 'E-mail', key: 'email', alignment: 'left', formatter: m => m.email || '' },
+        { header: 'Status', key: 'status', alignment: 'center', formatter: m => m.status === 'ACTIVE' ? 'Ativo' : 'Inativo' },
+        { header: 'Nível de Acesso', key: 'role', alignment: 'center', formatter: m => m.role || '' },
+        { 
+          header: 'Data de Nascimento', 
+          key: 'birthDate', 
+          alignment: 'center', 
+          formatter: m => m.birthDate ? m.birthDate.split('-').reverse().join('/') : '' 
+        },
+        { header: 'CPF', key: 'cpf', alignment: 'center', dataType: 'string', formatter: m => m.cpf || '' },
+        { header: 'RG', key: 'rg', alignment: 'center', dataType: 'string', formatter: m => m.rg || '' },
+        { header: 'WhatsApp / Celular', key: 'cell', alignment: 'center', dataType: 'string', formatter: m => m.cell || '' },
+        { header: 'Endereço', key: 'address', alignment: 'left', formatter: m => m.address || '' },
+        { header: 'Número', key: 'number', alignment: 'center', dataType: 'string', formatter: m => m.number || '' },
+        { header: 'Bairro', key: 'neighborhood', alignment: 'left', formatter: m => m.neighborhood || '' },
+        { header: 'Cidade', key: 'city', alignment: 'left', formatter: m => m.city || '' },
+        { header: 'Estado / UF', key: 'state', alignment: 'center', formatter: m => m.state || '' },
+        { header: 'CEP', key: 'cep', alignment: 'center', dataType: 'string', formatter: m => m.cep || '' },
+        { header: 'Estado Civil', key: 'maritalStatus', alignment: 'center', formatter: m => m.maritalStatus || '' },
+        { header: 'Cônjuge', key: 'spouseName', alignment: 'left', formatter: m => m.spouseName || '' },
+        { 
+          header: 'Data de Casamento', 
+          key: 'marriageDate', 
+          alignment: 'center', 
+          formatter: m => m.marriageDate ? m.marriageDate.split('-').reverse().join('/') : '' 
+        },
+        { header: 'Profissão', key: 'profession', alignment: 'left', formatter: m => m.profession || '' },
+        { header: 'Escolaridade', key: 'education', alignment: 'left', formatter: m => m.education || '' },
+        { header: 'Batizado', key: 'isBaptized', alignment: 'center', formatter: m => m.isBaptized ? 'Sim' : 'Não' },
+        { header: 'Batismo Espírito Santo', key: 'isHolySpiritBaptized', alignment: 'center', formatter: m => m.isHolySpiritBaptized ? 'Sim' : 'Não' },
+        { header: 'Data de Entrada', key: 'entryDate', alignment: 'center', formatter: m => m.entryDate || '' },
+        { header: 'Posição Atual', key: 'currentPosition', alignment: 'left', formatter: m => m.currentPosition || '' },
+        { header: 'Departamentos', key: 'departments', alignment: 'left', formatter: m => (m.departments || []).join(', ') },
+      ],
+    });
   };
 
   return (
@@ -296,7 +293,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           <p className="text-muted text-sm">Visualize e gerencie todos os cadastros da igreja</p>
         </div>
         <div className="flex gap-2">
-          {(isAdmin || isSecretary || isReception) && (
+          {isAdmin && (
             <Button onClick={handleExportExcel} variant="outline" className="shadow-sm">
               <Download className="w-4 h-4 mr-2" /> Exportar Excel
             </Button>
@@ -697,7 +694,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             >
                               <X className="w-4 h-4" />
                             </button>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               <input
                                 type="text"
                                 placeholder="Nome do Filho"
@@ -743,6 +740,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                 <option value="Sim">Congrega</option>
                                 <option value="Não">Não Congrega</option>
                               </select>
+                              {/* Departamento da criança */}
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Departamento da Criança</label>
+                                <select
+                                  value={(child.departments && child.departments[0]) || 'Nenhum Departamento'}
+                                  onChange={(e) => {
+                                    const newChildren = [...(selectedMember.children || [])];
+                                    newChildren[idx].departments = [e.target.value];
+                                    setSelectedMember({ ...selectedMember, children: newChildren });
+                                  }}
+                                  className="w-full p-1.5 rounded border border-muted/20 text-xs bg-white"
+                                >
+                                  {CHILD_DEPARTMENTS.map(d => (
+                                    <option key={d} value={d}>{d}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -1009,18 +1023,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <p className="text-[10px] text-muted uppercase font-bold">Cargo Atual</p>
-                      <p className="text-sm font-bold text-primary">{selectedMember.currentPosition}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Departamentos</p>
-                      <p className="text-sm font-bold text-primary">
-                        {selectedMember.departments.length > 0 ? selectedMember.departments.join(', ') : 'Nenhum'}
-                      </p>
+                      <p className="text-sm font-bold text-primary">{selectedMember.currentPosition || 'Membro'}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[10px] text-muted uppercase font-bold">Tempo no Cargo</p>
                       <p className="text-sm font-bold text-primary">
                         {(() => {
+                          if (!selectedMember.positionStartDate) return 'N/A';
                           const start = new Date(selectedMember.positionStartDate);
                           const now = new Date();
                           const diffTime = Math.abs(now.getTime() - start.getTime());
@@ -1031,7 +1040,55 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         })()}
                       </p>
                     </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted uppercase font-bold">Consagrado a</p>
+                      <p className="text-sm font-bold text-primary">{selectedMember.consecratedTo || 'Não informado'}</p>
+                    </div>
                   </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-primary/10">
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted uppercase font-bold">Departamento(s)</p>
+                      <p className="text-sm font-bold text-primary">
+                        {selectedMember.departments && selectedMember.departments.length > 0
+                          ? selectedMember.departments.join(', ')
+                          : 'Nenhum Departamento'}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted uppercase font-bold">Data de Entrada no Depto.</p>
+                      <p className="text-sm font-bold text-primary">
+                        {selectedMember.departmentStartDate
+                          ? selectedMember.departmentStartDate.split('-').reverse().join('/')
+                          : 'Não informada'}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted uppercase font-bold">Tempo no Departamento</p>
+                      <p className="text-sm font-bold text-primary">
+                        {(() => {
+                          if (!selectedMember.departmentStartDate) return 'N/A';
+                          const start = new Date(selectedMember.departmentStartDate);
+                          const now = new Date();
+                          const diffMs = now.getTime() - start.getTime();
+                          const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                          const years = Math.floor(totalDays / 365);
+                          const months = Math.floor((totalDays % 365) / 30);
+                          const days = totalDays % 30;
+                          return `${years > 0 ? `${years} ano(s) ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`.trim() || 'Recente';
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {selectedMember.consecrationDate && (
+                    <div className="pt-2 border-t border-primary/10">
+                      <p className="text-[10px] text-muted uppercase font-bold">Data da Consagração</p>
+                      <p className="text-sm font-bold text-primary">
+                        {selectedMember.consecrationDate.split('-').reverse().join('/')}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1080,9 +1137,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-[10px] font-bold text-muted uppercase">Departamentos Atuais</label>
+                    <label className="block text-[10px] font-bold text-muted uppercase">Departamento Atual</label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {DEPARTMENTS.map(dept => (
+                      {[
+                        ...DEPARTMENTS,
+                        ...(selectedMember.departments || []).filter(d => !DEPARTMENTS.includes(d) && d !== '')
+                      ].map(dept => (
                         <label key={dept} className="flex items-center gap-2 text-[10px] p-2 bg-muted/5 rounded">
                           <input
                             type="checkbox"
@@ -1098,6 +1158,64 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         </label>
                       ))}
                     </div>
+                    {/* Campo para adicionar departamento personalizado */}
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        type="text"
+                        placeholder="Adicionar outro departamento..."
+                        value={customDeptInput}
+                        onChange={(e) => setCustomDeptInput(e.target.value)}
+                        className="flex-1 p-1.5 rounded border border-muted/20 text-xs"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && customDeptInput.trim()) {
+                            e.preventDefault();
+                            const trimmed = customDeptInput.trim();
+                            if (!selectedMember.departments.includes(trimmed)) {
+                              setSelectedMember({ ...selectedMember, departments: [...selectedMember.departments, trimmed] });
+                            }
+                            setCustomDeptInput('');
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const trimmed = customDeptInput.trim();
+                          if (trimmed && !selectedMember.departments.includes(trimmed)) {
+                            setSelectedMember({ ...selectedMember, departments: [...selectedMember.departments, trimmed] });
+                          }
+                          setCustomDeptInput('');
+                        }}
+                        className="px-3 py-1 bg-secondary text-white text-[10px] font-bold rounded hover:bg-secondary/90 whitespace-nowrap"
+                      >
+                        + Adicionar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Data de Entrada no Departamento */}
+                  <div className="pt-3 border-t border-muted/5">
+                    <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Data de Entrada no Departamento</label>
+                    <input
+                      type="date"
+                      value={selectedMember.departmentStartDate || ''}
+                      onChange={(e) => setSelectedMember({ ...selectedMember, departmentStartDate: e.target.value })}
+                      className="w-full sm:w-1/2 p-2 rounded border border-muted/20 text-sm"
+                    />
+                    {selectedMember.departmentStartDate && (
+                      <p className="text-[10px] text-muted mt-1">
+                        {(() => {
+                          const start = new Date(selectedMember.departmentStartDate!);
+                          const now = new Date();
+                          const diffMs = now.getTime() - start.getTime();
+                          const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                          const years = Math.floor(totalDays / 365);
+                          const months = Math.floor((totalDays % 365) / 30);
+                          const days = totalDays % 30;
+                          return `Tempo no departamento: ${years > 0 ? `${years} ano(s) e ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`;
+                        })()}
+                      </p>
+                    )}
                   </div>
                 </div>
               )}

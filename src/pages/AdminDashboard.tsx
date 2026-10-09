@@ -40,6 +40,7 @@ import {
   Line, 
   Legend
 } from 'recharts';
+import { exportMultiSectionReport } from '../services/excel/excelExportService';
 
 interface AdminDashboardProps {
   members: Member[];
@@ -130,65 +131,129 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
 
   const allMembers = memberList.length;
   
-  // Membros ativos incluem perfis com status ACTIVE e tipo MEMBRO, somando as crianças congregantes (Congrega Conosco = SIM) sob esses perfis
-  const activeParents = memberList.filter(m => m.status === 'ACTIVE' && m.receivedAs === 'MEMBRO');
+  // Membros Ativos = membros com status ACTIVE
+  const activeMembers = memberList.filter(m => m.status === 'ACTIVE').length;
+  
+  // Membros Inativos = membros com status INACTIVE
+  const inactiveMembers = memberList.filter(m => m.status === 'INACTIVE').length;
+
+  // Apenas para o cálculo de engajamento (presencia vs membros ativos)
+  const activeParents = memberList.filter(m => m.status === 'ACTIVE');
   const activeChildrenCount = activeParents.reduce((acc, m) => {
     const validChildren = m.children?.filter((c: any) => c.congregates === 'Sim' || c.congregates === true) || [];
     return acc + validChildren.length;
   }, 0);
-  const activeMembers = activeParents.length + activeChildrenCount;
-  
-  const inactiveMembers = memberList.filter(m => m.status === 'INACTIVE' && m.receivedAs === 'MEMBRO').length;
-
-  const calculateDeptCount = (deptName: string, childDeptName?: string) => {
-    const memberCount = memberList.filter(m => 
-      (m.departments || []).some(d => d.toLowerCase().includes(deptName.toLowerCase()))
-    ).length;
-
-    const childrenCount = memberList.reduce((acc, m) => {
-      if (!m.children) return acc;
-      const matchingChildren = m.children.filter(c => {
-        const doesCongregate = c.congregates === 'Sim' || c.congregates === true;
-        if (deptName === 'Infantil') {
-          return doesCongregate;
-        }
-        return doesCongregate && (c.departments || []).some(d => d.toLowerCase().includes((childDeptName || deptName).toLowerCase()));
-      });
-      return acc + matchingChildren.length;
-    }, 0);
-
-    return memberCount + childrenCount;
-  };
 
   const stats = [
-    { label: 'Total de Cadastros', value: allMembers, icon: Users, color: 'bg-primary' },
+    { label: 'Membros Cadastrados', value: allMembers, icon: Users, color: 'bg-primary' },
     { label: 'Membros Ativos', value: activeMembers, icon: UserCheck, color: 'bg-emerald-600' },
-    { label: 'Membros Inativos', value: inactiveMembers, icon: UserX, color: 'bg-rose-600', sub: '> 1 ano e 6 meses' },
+    { label: 'Membros Inativos', value: inactiveMembers, icon: UserX, color: 'bg-rose-600' },
   ];
 
-  const deptData = [
-    { name: 'Adolescentes - Ele vem', value: calculateDeptCount('Adolescente', 'Adolescência') },
-    { name: 'Infantil - Corderinhos', value: calculateDeptCount('Infantil') },
-    { name: 'The Search', value: calculateDeptCount('Jovens', 'The Search') },
-    { name: 'Circulo de Oração', value: calculateDeptCount('Irmãs', 'Rosas de Saron') },
-    { name: 'Obreiros', value: calculateDeptCount('Obreiros') },
-    { name: 'Mídia', value: calculateDeptCount('Mídia') },
+  // Mapeamento centralizado de departamentos para o gráfico
+  const DEPT_CHART_LIST = [
+    { label: 'Dep. The Search', memberKey: 'The Search', childKey: 'The Search' },
+    { label: 'Dep. Lideres', memberKey: 'Lideres', childKey: null },
+    { label: 'Dep. Secretaria', memberKey: 'Secretaria', childKey: null },
+    { label: 'Dep. Mídia', memberKey: 'Mídia', childKey: null },
+    { label: 'Dep. Rosas de Saron', memberKey: 'Rosas de Saron', childKey: null },
+    { label: 'Dep. Evangelismo', memberKey: 'Evangelismo', childKey: null },
+    { label: 'Dep. Tesouraria', memberKey: 'Tesouraria', childKey: null },
+    { label: 'Dep. Louvor', memberKey: 'Louvor', childKey: null },
+    { label: 'Dep. Som/Tecnica', memberKey: 'Som', childKey: null },
+    { label: 'Dep. Obreiros', memberKey: 'Obreiros', childKey: null },
+    { label: 'Dep. Recepção', memberKey: 'Recepção', childKey: null },
+    { label: 'Dep. Escola Biblica Dominical', memberKey: 'Escola Biblica', childKey: null },
+    { label: 'Dep. Ele Vem', memberKey: null, childKey: 'Ele Vem' },
+    { label: 'Dep. Corderinhos', memberKey: null, childKey: 'Corderinhos' },
+    { label: 'Nenhum Departamento', memberKey: 'Nenhum', childKey: 'Nenhum' },
   ];
+
+  const standardDeptsLower = [
+    'the search', 'lideres', 'secretaria', 'mídia', 'midia', 'rosas de saron',
+    'evangelismo', 'tesouraria', 'louvor', 'som', 'tecnica', 'obreiros',
+    'recepção', 'recepcao', 'escola biblica', 'ele vem', 'corderinhos', 'nenhum'
+  ];
+
+  const baseDeptData = DEPT_CHART_LIST.map(({ label, memberKey, childKey }) => {
+    const memberCount = memberKey
+      ? memberList.filter(m => (m.departments || []).some(d => d.toLowerCase().includes(memberKey.toLowerCase()))).length
+      : 0;
+    const childCount = childKey
+      ? memberList.reduce((acc, m) => {
+          if (!m.children) return acc;
+          return acc + m.children.filter(c => {
+            const dept = (c.departments && c.departments[0]) || '';
+            return dept.toLowerCase().includes(childKey.toLowerCase());
+          }).length;
+        }, 0)
+      : 0;
+    return { name: label, value: memberCount + childCount };
+  });
+
+  // Coleta qualquer departamento customizado adicionado aos membros ou filhos
+  const customDeptsSet = new Set<string>();
+  memberList.forEach(m => {
+    (m.departments || []).forEach(d => {
+      const trimmed = d?.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (!standardDeptsLower.some(k => lower.includes(k))) {
+        customDeptsSet.add(trimmed);
+      }
+    });
+    (m.children || []).forEach(c => {
+      (c.departments || []).forEach(d => {
+        const trimmed = d?.trim();
+        if (!trimmed) return;
+        const lower = trimmed.toLowerCase();
+        if (!standardDeptsLower.some(k => lower.includes(k))) {
+          customDeptsSet.add(trimmed);
+        }
+      });
+    });
+  });
+
+  const customDeptData = Array.from(customDeptsSet).map(customDept => {
+    const memberCount = memberList.filter(m => (m.departments || []).includes(customDept)).length;
+    const childCount = memberList.reduce((acc, m) => {
+      if (!m.children) return acc;
+      return acc + m.children.filter(c => (c.departments || []).includes(customDept)).length;
+    }, 0);
+    return { name: customDept, value: memberCount + childCount };
+  });
+
+  const deptData = [...baseDeptData, ...customDeptData];
 
   const consecrationData = React.useMemo(() => {
+    const isPastor = (m: Member) => {
+      const val = `${m.consecratedTo || ''} ${m.currentPosition || ''}`.toLowerCase();
+      return val.includes('pastor');
+    };
+    const isEvangelista = (m: Member) => {
+      const val = `${m.consecratedTo || ''} ${m.currentPosition || ''}`.toLowerCase();
+      return val.includes('evangelista');
+    };
+    const isPresbitero = (m: Member) => {
+      const val = `${m.consecratedTo || ''} ${m.currentPosition || ''}`.toLowerCase();
+      return val.includes('presb');
+    };
+    const isDiacono = (m: Member) => {
+      const val = `${m.consecratedTo || ''} ${m.currentPosition || ''}`.toLowerCase();
+      return val.includes('diác') || val.includes('diac');
+    };
+    const isMissionario = (m: Member) => {
+      const val = `${m.consecratedTo || ''} ${m.currentPosition || ''}`.toLowerCase();
+      return val.includes('missionár') || val.includes('missionar');
+    };
+
     return [
-      { name: 'Cooperador', value: memberList.filter(m => m.consecratedTo === 'Cooperador' || m.currentPosition === 'Cooperador').length },
-      { name: 'Obreiro', value: memberList.filter(m => m.consecratedTo === 'Obreiro' || m.currentPosition === 'Obreiro').length },
-      { name: 'Obreira', value: memberList.filter(m => m.consecratedTo === 'Obreira' || m.currentPosition === 'Obreira').length },
-      { name: 'Diácono', value: memberList.filter(m => m.consecratedTo === 'Diacono' || m.consecratedTo === 'Diácono' || m.currentPosition === 'Diácono' || m.currentPosition === 'Diacono').length },
-      { name: 'Diaconisa', value: memberList.filter(m => m.consecratedTo === 'Diaconisa' || m.currentPosition === 'Diaconisa').length },
-      { name: 'Missionário', value: memberList.filter(m => m.consecratedTo === 'Missionário' || m.currentPosition === 'Missionário').length },
-      { name: 'Missionária', value: memberList.filter(m => m.consecratedTo === 'Missionária' || m.currentPosition === 'Missionária').length },
-      { name: 'Presbítero', value: memberList.filter(m => m.consecratedTo === 'Presbitero' || m.consecratedTo === 'Presbítero' || m.currentPosition === 'Presbítero' || m.currentPosition === 'Presbitero').length },
-      { name: 'Evangelista', value: memberList.filter(m => m.consecratedTo === 'Evangelista' || m.currentPosition === 'Evangelista').length },
-      { name: 'Pastor', value: memberList.filter(m => m.consecratedTo === 'Pastor' || m.currentPosition === 'Pastor').length },
-      { name: 'Pastora', value: memberList.filter(m => m.consecratedTo === 'Pastora' || m.currentPosition === 'Pastora').length },
-    ].filter(item => item.value > 0);
+      { name: 'Pastor/Pastora', value: memberList.filter(isPastor).length },
+      { name: 'Evangelista', value: memberList.filter(isEvangelista).length },
+      { name: 'Presbítero', value: memberList.filter(isPresbitero).length },
+      { name: 'Diácono/ Diaconisa', value: memberList.filter(isDiacono).length },
+      { name: 'Missionário / Missionária', value: memberList.filter(isMissionario).length },
+    ];
   }, [memberList]);
 
   const months = [
@@ -397,101 +462,117 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
   }, [filteredFreqs]);
 
   // ==========================================
-  // EXPORTADORES
+  // EXPORTADORES (EXCEL .XLSX PADRONIZADO)
   // ==========================================
-  const handleExportMembersExcel = () => {
-    const relatorioMes = [
-      ['RELATÓRIO GERENCIAL - DASHBOARD', monthFilter === -1 ? `ANO DE ${yearFilter}` : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`],
-      [],
-      ['1. VISÃO GERAL'],
-      ['Métrica', 'Quantidade'],
-      ...stats.map(s => [s.label, s.value]),
-      [],
-      ['2. MINISTÉRIOS DA IGREJA'],
-      ['Departamento', 'Cadastros'],
-      ...deptData.map(d => [d.name, d.value]),
-      [],
-      ['3. CONSAGRAÇÃO'],
-      ['Cargo', 'Cadastros'],
-      ...consecrationData.map(c => [c.name, c.value]),
-      [],
-      [monthFilter === -1 ? '4. ANIVERSARIANTES DE NASCIMENTO (Ano Selecionado)' : '4. ANIVERSARIANTES DE NASCIMENTO (Mês Selecionado)'],
-      ['Nome', 'Data de Nascimento', 'Dia', 'Celular'],
-      ...birthdaysInMonth.map(m => {
-        const dateParsed = parseDateToMonthDayYear(m.birthDate);
-        return [
-          `${m.firstName} ${m.lastName || ''}`,
-          m.birthDate || '',
-          dateParsed ? `${dateParsed.day}/${dateParsed.month + 1}` : '?',
-          m.cell || ''
-        ];
-      }),
-      [],
-      [monthFilter === -1 ? '5. ANIVERSÁRIOS DE CASAMENTO (Ano Selecionado)' : '5. ANIVERSÁRIOS DE CASAMENTO (Mês Selecionado)'],
-      ['Nome do Casal', 'Data de Casamento', 'Dia/Mês', 'Anos de União'],
-      ...weddingsInMonth.map(m => {
-        const dateParsed = parseDateToMonthDayYear(m.marriageDate!);
-        const year = dateParsed ? dateParsed.year : yearFilter;
-        return [
-          `${m.firstName} e ${m.spouseName}`,
-          m.marriageDate || '',
-          dateParsed ? `${dateParsed.day}/${dateParsed.month + 1}` : '?',
-          `${yearFilter - year} anos`
-        ];
-      })
-    ];
-
-    const csvContent = relatorioMes.map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    
+  const handleExportMembersExcel = async () => {
     const fileNameMonth = monthFilter === -1 ? 'anual' : months[monthFilter].toLowerCase();
-    link.setAttribute('download', `relatorio_dashboard_${fileNameMonth}_${yearFilter}.csv`);
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const periodLabel = monthFilter === -1 ? `ANO DE ${yearFilter}` : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`;
+
+    const birthdayRows = birthdaysInMonth.map(m => {
+      const dateParsed = parseDateToMonthDayYear(m.birthDate);
+      const birthFormatted = m.birthDate ? m.birthDate.split('-').reverse().join('/') : '';
+      const dayMonth = dateParsed ? `${String(dateParsed.day).padStart(2, '0')}/${String(dateParsed.month + 1).padStart(2, '0')}` : '';
+      return [
+        `${m.firstName} ${m.lastName || ''}`.trim(),
+        birthFormatted,
+        dayMonth,
+        m.cell || ''
+      ];
+    });
+
+    const weddingRows = weddingsInMonth.map(m => {
+      const dateParsed = parseDateToMonthDayYear(m.marriageDate!);
+      const year = dateParsed ? dateParsed.year : yearFilter;
+      const weddingFormatted = m.marriageDate ? m.marriageDate.split('-').reverse().join('/') : '';
+      const dayMonth = dateParsed ? `${String(dateParsed.day).padStart(2, '0')}/${String(dateParsed.month + 1).padStart(2, '0')}` : '';
+      return [
+        `${m.firstName} e ${m.spouseName}`,
+        weddingFormatted,
+        dayMonth,
+        `${yearFilter - year} anos`
+      ];
+    });
+
+    await exportMultiSectionReport({
+      fileName: `relatorio_dashboard_${fileNameMonth}_${yearFilter}.xlsx`,
+      sheetName: 'Visão Geral',
+      title: 'ADFC — Relatório Gerencial de Membros e Ministérios',
+      subTitle: `Período: ${periodLabel} | Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
+      sections: [
+        {
+          title: '1. VISÃO GERAL',
+          headers: ['Métrica', 'Quantidade'],
+          rows: stats.map(s => [s.label, s.value]),
+          alignments: ['left', 'right'],
+        },
+        {
+          title: '2. DEPARTAMENTOS',
+          headers: ['Departamento', 'Cadastros'],
+          rows: deptData.map(d => [d.name, d.value]),
+          alignments: ['left', 'right'],
+        },
+        {
+          title: '3. MINISTÉRIOS',
+          headers: ['Ministério', 'Cadastros'],
+          rows: consecrationData.map(c => [c.name, c.value]),
+          alignments: ['left', 'right'],
+        },
+        {
+          title: monthFilter === -1 ? '4. ANIVERSARIANTES DE NASCIMENTO (Ano Selecionado)' : '4. ANIVERSARIANTES DE NASCIMENTO (Mês Selecionado)',
+          headers: ['Nome Completo', 'Data de Nascimento', 'Dia / Mês', 'WhatsApp / Celular'],
+          rows: birthdayRows,
+          alignments: ['left', 'center', 'center', 'center'],
+        },
+        {
+          title: monthFilter === -1 ? '5. ANIVERSÁRIOS DE CASAMENTO (Ano Selecionado)' : '5. ANIVERSÁRIOS DE CASAMENTO (Mês Selecionado)',
+          headers: ['Nome do Casal', 'Data de Casamento', 'Dia / Mês', 'Tempo de União'],
+          rows: weddingRows,
+          alignments: ['left', 'center', 'center', 'center'],
+        }
+      ]
+    });
   };
 
-  const handleExportFrequencyExcel = () => {
-    const reportData = [
-      ['ADFC - RELATÓRIO E INDICADORES DE FREQUÊNCIA', monthFilter === -1 ? `ANO DE ${yearFilter}` : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`],
-      [],
-      ['1. INDICADORES DO PERÍODO'],
-      ['Métrica', 'Valor'],
-      ['Total de Cultos Realizados', totalCults],
-      ['Presença Média Geral', avgAttendance],
-      ['Presença Média de Visitantes', avgVisitors],
-      ['Presença Média de Adultos', avgMembersPresent],
-      ['Taxa Média de Engajamento de Membros', `${engagementPercent}%`],
-      [],
-      ['2. HISTÓRICO ANALÍTICO DOS CULTOS'],
-      ['Data do Culto', 'Tema do Culto', 'Preleitor', 'Presença Visitantes', 'Presença Crianças', 'Presença Adultos', 'Presença Total'],
-      ...filteredFreqs.map(f => [
-        formatDateDisplay(f.cultDate),
-        f.theme,
-        f.speaker || '',
-        f.visitorsAttendance,
-        f.childrenAttendance || 0,
-        Math.max(0, f.totalAttendance - (f.visitorsAttendance + (f.childrenAttendance || 0))),
-        f.totalAttendance
-      ])
-    ];
-
-    const csvContent = reportData.map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    
+  const handleExportFrequencyExcel = async () => {
     const fileMonthName = monthFilter === -1 ? 'anual' : months[monthFilter].toLowerCase();
-    link.setAttribute('download', `relatorio_frequencia_${fileMonthName}_${yearFilter}.csv`);
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const periodLabel = monthFilter === -1 ? `ANO DE ${yearFilter}` : `${months[monthFilter].toUpperCase()} DE ${yearFilter}`;
+
+    const frequencyRows = filteredFreqs.map(f => [
+      formatDateDisplay(f.cultDate),
+      f.theme,
+      f.speaker || '',
+      f.visitorsAttendance ?? 0,
+      f.childrenAttendance ?? 0,
+      Math.max(0, f.totalAttendance - (f.visitorsAttendance + (f.childrenAttendance || 0))),
+      f.totalAttendance ?? 0
+    ]);
+
+    await exportMultiSectionReport({
+      fileName: `relatorio_frequencia_${fileMonthName}_${yearFilter}.xlsx`,
+      sheetName: 'Frequência dos Cultos',
+      title: 'ADFC — Relatório e Indicadores de Frequência',
+      subTitle: `Período: ${periodLabel} | Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
+      sections: [
+        {
+          title: '1. INDICADORES DO PERÍODO',
+          headers: ['Indicador', 'Valor'],
+          rows: [
+            ['Total de Cultos Realizados', totalCults],
+            ['Presença Média Geral', avgAttendance],
+            ['Presença Média de Visitantes', avgVisitors],
+            ['Presença Média de Adultos', avgMembersPresent],
+            ['Taxa Média de Engajamento de Membros', `${engagementPercent}%`],
+          ],
+          alignments: ['left', 'right'],
+        },
+        {
+          title: '2. HISTÓRICO ANALÍTICO DOS CULTOS',
+          headers: ['Data do Culto', 'Tema do Culto', 'Preleitor', 'Visitantes', 'Crianças', 'Adultos', 'Presença Total'],
+          rows: frequencyRows,
+          alignments: ['center', 'left', 'left', 'right', 'right', 'right', 'right'],
+        }
+      ]
+    });
   };
 
   return (
@@ -503,7 +584,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
           <h1 className="text-2xl font-display font-bold text-primary flex items-center gap-2">
             <LayoutDashboard className="w-7 h-7 text-primary" /> Dashboards
           </h1>
-          <p className="text-muted text-sm">Gestão Estratégica — Assembleia Família Cristã</p>
+          <p className="text-muted text-sm">Análises de dados — Assembleia Família Cristã</p>
         </div>
         
         {/* FILTROS E ACOES */}
@@ -561,7 +642,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
           onClick={() => setActiveTab('members')}
           className={`px-6 py-3.5 font-display font-bold text-sm border-b-2 transition-all cursor-pointer ${activeTab === 'members' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-primary'}`}
         >
-          Cadastros & Aniversariantes
+          Informações Gerais
         </button>
         <button 
           onClick={() => setActiveTab('frequency')}
@@ -596,66 +677,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
                   <div>
                     <p className="text-[10px] text-muted font-bold uppercase tracking-wider">{stat.label}</p>
                     <p className="text-3xl font-display font-bold text-primary">{stat.value}</p>
-                    {stat.sub && <p className="text-[9px] text-rose-500 font-bold">{stat.sub}</p>}
+                    {(stat as any).sub && <p className="text-[9px] text-rose-500 font-bold">{(stat as any).sub}</p>}
                   </div>
                 </Card>
               ))}
             </div>
           </section>
 
-          {/* MINISTÉRIOS */}
+          {/* DEPARTAMENTOS */}
           <section className="space-y-4">
-            <h2 className="text-lg font-display font-bold text-primary flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-primary" /> MINISTÉRIOS DA IGREJA
-            </h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card title="Cadastro por Departamento">
-                <div className="h-[300px] w-full">
+            <div className="grid grid-cols-1 gap-6">
+              <Card title="Departamentos">
+                <div className="w-full" style={{ height: `${Math.max(420, deptData.length * 28 + 40)}px` }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={deptData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EDE9D8" />
-                      <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
-                      <YAxis fontSize={10} axisLine={false} tickLine={false} />
+                    <BarChart data={deptData} layout="vertical" margin={{ left: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#EDE9D8" />
+                      <XAxis type="number" fontSize={10} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis dataKey="name" type="category" fontSize={9} width={185} axisLine={false} tickLine={false} />
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                        formatter={(value) => [value, 'Membros']}
                       />
-                      <Bar dataKey="value" fill="#466486" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="value" name="Membros" fill="#466486" radius={[0, 4, 4, 0]} barSize={16} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </Card>
 
-              <Card title="Cadastros por Consagrado a">
-                <div className="h-[300px] w-full flex items-center justify-center">
+              <Card title="Ministérios">
+                <div className="h-[260px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={consecrationData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {consecrationData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" className="font-display font-bold fill-primary text-xs">
-                        Consagrados
-                      </text>
-                    </PieChart>
+                    <BarChart data={consecrationData} layout="vertical" margin={{ left: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#EDE9D8" />
+                      <XAxis type="number" fontSize={10} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis dataKey="name" type="category" fontSize={10} width={160} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                        formatter={(value) => [value, 'Membros']}
+                      />
+                      <Bar dataKey="value" name="Membros" fill="#95836C" radius={[0, 4, 4, 0]} barSize={18} />
+                    </BarChart>
                   </ResponsiveContainer>
-                  <div className="hidden sm:block space-y-1">
-                    {consecrationData.map((entry, index) => (
-                      <div key={index} className="flex items-center gap-2 text-xs">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                        <span className="text-muted font-medium">{entry.name}: {entry.value}</span>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </Card>
             </div>

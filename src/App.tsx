@@ -152,7 +152,7 @@ const AppContent: React.FC = () => {
           </Suspense>
         );
       case 'dashboard':
-        if (user.role !== 'ADMIN' && user.role !== 'SECRETARY') {
+        if (user.role !== 'ADMIN') {
           return <HomePage onNavigate={setCurrentPage} />;
         }
         return (

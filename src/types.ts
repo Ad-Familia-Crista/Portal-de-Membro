@@ -44,6 +44,7 @@ export interface Child {
   birthDate: string;
   congregates?: 'Sim' | 'Não' | string;
   departments?: string[];
+  departmentStartDate?: string; // Data de entrada no departamento
 }
 
 export interface MinisterialEvent {
@@ -110,6 +111,7 @@ export interface Member {
   currentPosition: string;
   positionStartDate: string;
   departments: string[];
+  departmentStartDate?: string; // Data de entrada no departamento atual
   leaderDepartment?: string;
   
   // Consecration
@@ -131,24 +133,26 @@ export interface Member {
 }
 
 export const DEPARTMENTS = [
-  'Departamento de Jovens – The Search',
-  'Departamento Irmãs - Rosas de Saron',
-  'Departamento de Obreiros (Cooperadores)',
-  'Departamento de Líderes',
-  'Evangelismo',
-  'Escola Bíblica Dominical',
-  'Secretariado',
-  'Tesouraria',
-  'Recepção',
-  'Mídia',
-  'Sonoplastia e Slide',
-  'Nenhum'
+  'Dep. The Search',
+  'Dep. Lideres',
+  'Dep. Secretaria',
+  'Dep. Mídia',
+  'Dep. Rosas de Saron',
+  'Dep. Evangelismo',
+  'Dep. Tesouraria',
+  'Dep. Louvor',
+  'Dep. Som/Tecnica',
+  'Dep. Obreiros',
+  'Dep. Recepção',
+  'Dep. Escola Biblica Dominical',
+  'Nenhum Departamento'
 ];
 
 export const CHILD_DEPARTMENTS = [
-  'Departamento da Adolescência',
-  'Departamento Infantil – Cordeirinhos',
-  'Departamento de Jovens – The Search'
+  'Nenhum Departamento',
+  'Dep. Ele Vem',
+  'Dep. Corderinhos',
+  'Dep. The Search'
 ];
 
 export const CONSECRATIONS = [

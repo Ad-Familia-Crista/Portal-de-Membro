@@ -27,6 +27,7 @@ const FIELD_MAPPING: Record<string, string> = {
   // Ministerial
   currentPosition: 'current_position',
   positionStartDate: 'position_start_date',
+  departmentStartDate: 'department_start_date',
   leaderDepartment: 'leader_department',
   consecratedTo: 'consecrated_to',
   consecrationDate: 'consecration_date',

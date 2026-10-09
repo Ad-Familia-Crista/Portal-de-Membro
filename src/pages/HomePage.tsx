@@ -222,16 +222,18 @@ export const HomePage: React.FC<{ onNavigate: (page: string) => void }> = ({ onN
     menuItems.push({ id: 'birthday-dashboard', label: 'Aniversariantes', icon: Cake, description: 'Ver e exportar aniversariantes' });
   }
 
-  // Admin / Secretary items in required order
-  if (user.role === 'ADMIN' || user.role === 'SECRETARY') {
+  // Secretary items in required order: Gestão de Membros, Aniversariantes, Frequência
+  if (user.role === 'SECRETARY') {
+    menuItems.push({ id: 'members', label: 'Gestão de Membros', icon: UserPlus, description: 'Visualizar e editar cadastros' });
+    menuItems.push({ id: 'birthday-dashboard', label: 'Aniversariantes', icon: Cake, description: 'Ver e exportar aniversariantes' });
+    menuItems.push({ id: 'worship-frequency', label: 'Frequência', icon: ClipboardList, description: 'Lançar presenças dos cultos' });
+  }
+
+  // Admin items in required order
+  if (user.role === 'ADMIN') {
     menuItems.push({ id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard, description: 'KPIs e Gestão de Membros' });
     menuItems.push({ id: 'worship-frequency', label: 'Registrar Frequência', icon: ClipboardList, description: 'Lançar presenças dos cultos' });
     menuItems.push({ id: 'members', label: 'Gestão de Membros', icon: UserPlus, description: 'Visualizar e editar cadastros' });
-    // Access management only for ADMIN, added later if applicable
-  }
-
-  // Access management (ADMIN only)
-  if (user.role === 'ADMIN') {
     menuItems.push({ id: 'access', label: 'Gerenciamento de Acesso', icon: Shield, description: 'Gerir permissões de secretárias e membros' });
   }
 
