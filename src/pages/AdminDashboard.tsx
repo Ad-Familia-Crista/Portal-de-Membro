@@ -124,21 +124,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
   // ==========================================
   // CÁLCULOS: CADASTROS & ANIVERSARIANTES
   // ==========================================
-  // Filtrar apenas cadastros com nível de acesso MEMBER
+  // Considerar todos os cadastros existentes na plataforma (membros, admins, secretários, etc.)
   const memberList = React.useMemo(() => {
-    return members.filter(m => m.role === 'MEMBER');
+    return members;
   }, [members]);
 
   const allMembers = memberList.length;
-  
-  // Membros Ativos = membros com status ACTIVE
-  const activeMembers = memberList.filter(m => m.status === 'ACTIVE').length;
-  
-  // Membros Inativos = membros com status INACTIVE
+  // Membros Inativos = membros com status marcado como INACTIVE
   const inactiveMembers = memberList.filter(m => m.status === 'INACTIVE').length;
+  // Membros Ativos = cadastros ativos (Membros cadastrados = ativos + inativos)
+  const activeMembers = allMembers - inactiveMembers;
 
-  // Apenas para o cálculo de engajamento (presencia vs membros ativos)
-  const activeParents = memberList.filter(m => m.status === 'ACTIVE');
+  // Apenas para o cálculo de engajamento (presenca vs membros ativos)
+  const activeParents = memberList.filter(m => m.status !== 'INACTIVE');
   const activeChildrenCount = activeParents.reduce((acc, m) => {
     const validChildren = m.children?.filter((c: any) => c.congregates === 'Sim' || c.congregates === true) || [];
     return acc + validChildren.length;
@@ -150,45 +148,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
     { label: 'Membros Inativos', value: inactiveMembers, icon: UserX, color: 'bg-rose-600' },
   ];
 
-  // Mapeamento centralizado de departamentos para o gráfico
+  // Mapeamento centralizado dos 15 departamentos oficiais para o gráfico
   const DEPT_CHART_LIST = [
-    { label: 'Dep. The Search', memberKey: 'The Search', childKey: 'The Search' },
-    { label: 'Dep. Lideres', memberKey: 'Lideres', childKey: null },
-    { label: 'Dep. Secretaria', memberKey: 'Secretaria', childKey: null },
-    { label: 'Dep. Mídia', memberKey: 'Mídia', childKey: null },
-    { label: 'Dep. Rosas de Saron', memberKey: 'Rosas de Saron', childKey: null },
-    { label: 'Dep. Evangelismo', memberKey: 'Evangelismo', childKey: null },
-    { label: 'Dep. Tesouraria', memberKey: 'Tesouraria', childKey: null },
-    { label: 'Dep. Louvor', memberKey: 'Louvor', childKey: null },
-    { label: 'Dep. Som/Tecnica', memberKey: 'Som', childKey: null },
-    { label: 'Dep. Obreiros', memberKey: 'Obreiros', childKey: null },
-    { label: 'Dep. Recepção', memberKey: 'Recepção', childKey: null },
-    { label: 'Dep. Escola Biblica Dominical', memberKey: 'Escola Biblica', childKey: null },
-    { label: 'Dep. Ele Vem', memberKey: null, childKey: 'Ele Vem' },
-    { label: 'Dep. Corderinhos', memberKey: null, childKey: 'Corderinhos' },
-    { label: 'Nenhum Departamento', memberKey: 'Nenhum', childKey: 'Nenhum' },
+    { label: 'Dep. The Search', memberKey: 'The Search' },
+    { label: 'Dep. Lideres', memberKey: 'Lideres' },
+    { label: 'Dep. Secretaria', memberKey: 'Secretaria' },
+    { label: 'Dep. Mídia', memberKey: 'Mídia' },
+    { label: 'Dep. Rosas de Saron', memberKey: 'Rosas de Saron' },
+    { label: 'Dep. Evangelismo', memberKey: 'Evangelismo' },
+    { label: 'Dep. Tesouraria', memberKey: 'Tesouraria' },
+    { label: 'Dep. Louvor', memberKey: 'Louvor' },
+    { label: 'Dep. Som/Tecnica', memberKey: 'Som' },
+    { label: 'Dep. Obreiros', memberKey: 'Obreiros' },
+    { label: 'Dep. Recepção', memberKey: 'Recepção' },
+    { label: 'Dep. Escola Biblica Dominical', memberKey: 'Escola Biblica' },
+    { label: 'Dep. Ele Vem', memberKey: 'Ele Vem' },
+    { label: 'Dep. Corderinhos', memberKey: 'Corderinhos' },
+    { label: 'Nenhum Departamento', memberKey: 'Nenhum' },
   ];
 
   const standardDeptsLower = [
     'the search', 'lideres', 'secretaria', 'mídia', 'midia', 'rosas de saron',
     'evangelismo', 'tesouraria', 'louvor', 'som', 'tecnica', 'obreiros',
-    'recepção', 'recepcao', 'escola biblica', 'ele vem', 'corderinhos', 'nenhum'
+    'recepção', 'recepcao', 'escola biblica', 'ele vem', 'corderinhos', 'cordeirinhos', 'nenhum'
   ];
 
-  const baseDeptData = DEPT_CHART_LIST.map(({ label, memberKey, childKey }) => {
-    const memberCount = memberKey
-      ? memberList.filter(m => (m.departments || []).some(d => d.toLowerCase().includes(memberKey.toLowerCase()))).length
-      : 0;
-    const childCount = childKey
-      ? memberList.reduce((acc, m) => {
-          if (!m.children) return acc;
-          return acc + m.children.filter(c => {
-            const dept = (c.departments && c.departments[0]) || '';
-            return dept.toLowerCase().includes(childKey.toLowerCase());
-          }).length;
-        }, 0)
-      : 0;
-    return { name: label, value: memberCount + childCount };
+  const baseDeptData = DEPT_CHART_LIST.map(({ label, memberKey }) => {
+    if (label === 'Nenhum Departamento') {
+      const count = memberList.filter(m => 
+        !m.departments || 
+        m.departments.length === 0 || 
+        m.departments.includes('Nenhum Departamento') ||
+        m.departments.some(d => d.toLowerCase().includes('nenhum'))
+      ).length;
+      return { name: label, value: count };
+    }
+
+    if (label === 'Dep. Ele Vem') {
+      const childCount = memberList.reduce((acc, m) => {
+        if (!m.children) return acc;
+        return acc + m.children.filter(c => {
+          const dept = (c.departments && c.departments[0]) || '';
+          return dept.toLowerCase().includes('ele vem');
+        }).length;
+      }, 0);
+      return { name: label, value: childCount };
+    }
+
+    if (label === 'Dep. Corderinhos') {
+      const childCount = memberList.reduce((acc, m) => {
+        if (!m.children) return acc;
+        return acc + m.children.filter(c => {
+          const dept = (c.departments && c.departments[0]) || '';
+          return dept.toLowerCase().includes('corderinhos') || dept.toLowerCase().includes('cordeirinhos');
+        }).length;
+      }, 0);
+      return { name: label, value: childCount };
+    }
+
+    if (label === 'Dep. The Search') {
+      const memberCount = memberList.filter(m => (m.departments || []).some(d => d.toLowerCase().includes('the search'))).length;
+      const childCount = memberList.reduce((acc, m) => {
+        if (!m.children) return acc;
+        return acc + m.children.filter(c => {
+          const dept = (c.departments && c.departments[0]) || '';
+          return dept.toLowerCase().includes('the search');
+        }).length;
+      }, 0);
+      return { name: label, value: memberCount + childCount };
+    }
+
+    const memberCount = memberList.filter(m => (m.departments || []).some(d => d.toLowerCase().includes(memberKey.toLowerCase()))).length;
+    return { name: label, value: memberCount };
   });
 
   // Coleta qualquer departamento customizado adicionado aos membros ou filhos

@@ -1453,17 +1453,22 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             />
                           </div>
 
-                          <div className="pt-2 space-y-1.5 border-t border-muted/10">
-                            <label className="text-xs font-semibold text-black">Departamento da Criança</label>
-                            <select
-                              {...register(`children.${index}.departments.0`)}
-                              className="w-full p-2 rounded border border-muted/20 text-xs bg-white h-9 focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer"
-                            >
-                              {CHILD_DEPARTMENTS.map(dept => (
-                                <option key={dept} value={dept}>{dept}</option>
-                              ))}
-                            </select>
-                          </div>
+                          {isAdminOrSecretary && (
+                            <div className="pt-2 space-y-1.5 border-t border-muted/10">
+                              <label className="text-xs font-semibold text-black flex items-center justify-between">
+                                <span>Departamento da Criança</span>
+                                <span className="text-[10px] bg-black/5 text-black/70 px-2 py-0.5 rounded font-mono font-bold">Admin/Sec</span>
+                              </label>
+                              <select
+                                {...register(`children.${index}.departments.0`)}
+                                className="w-full p-2 rounded border border-muted/20 text-xs bg-white h-9 focus:outline-none focus:ring-2 focus:ring-black/30 cursor-pointer"
+                              >
+                                {CHILD_DEPARTMENTS.map(dept => (
+                                  <option key={dept} value={dept}>{dept}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1856,6 +1861,30 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                           <p className="text-sm font-bold text-black">
                             {watch('consecrationDate').split('-').reverse().join('/')}
                           </p>
+                        </div>
+                      )}
+
+                      {/* Departamento do filho, criança ou adolescente */}
+                      {watch('children')?.some((c: any) => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento') && (
+                        <div className="pt-3 border-t border-black/10 space-y-2">
+                          <p className="text-[10px] text-muted uppercase font-bold flex items-center gap-1.5">
+                            <span>👶 Departamento do Filho / Criança / Adolescente</span>
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {watch('children')
+                              .filter((c: any) => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento')
+                              .map((c: any, cIdx: number) => (
+                                <div key={cIdx} className="p-2.5 bg-black/5 rounded-lg border border-black/10 flex items-center justify-between">
+                                  <div>
+                                    <p className="text-xs font-bold text-black">{c.name || `Filho(a) #${cIdx + 1}`}</p>
+                                    <p className="text-[10px] text-muted">Vínculo infantil / adolescente</p>
+                                  </div>
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-secondary/15 text-secondary">
+                                    {c.departments[0]}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
                         </div>
                       )}
                     </div>

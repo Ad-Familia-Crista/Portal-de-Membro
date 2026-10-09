@@ -145,6 +145,8 @@ export const DEPARTMENTS = [
   'Dep. Obreiros',
   'Dep. Recepção',
   'Dep. Escola Biblica Dominical',
+  'Dep. Ele Vem',
+  'Dep. Corderinhos',
   'Nenhum Departamento'
 ];
 

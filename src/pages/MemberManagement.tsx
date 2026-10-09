@@ -27,6 +27,7 @@ import { optimizeImage } from '../lib/imageOptimizer';
 import { MemberTableSkeleton } from '../components/Skeletons';
 import { useToast } from '../components/Toast';
 import { exportTableToExcel } from '../services/excel/excelExportService';
+import { loadAllDepartments, addDepartment, subscribeDepartments } from '../lib/departmentsService';
 
 interface MemberManagementProps {
   members: Member[];
@@ -740,23 +741,28 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                 <option value="Sim">Congrega</option>
                                 <option value="Não">Não Congrega</option>
                               </select>
-                              {/* Departamento da criança */}
-                              <div className="sm:col-span-2">
-                                <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Departamento da Criança</label>
-                                <select
-                                  value={(child.departments && child.departments[0]) || 'Nenhum Departamento'}
-                                  onChange={(e) => {
-                                    const newChildren = [...(selectedMember.children || [])];
-                                    newChildren[idx].departments = [e.target.value];
-                                    setSelectedMember({ ...selectedMember, children: newChildren });
-                                  }}
-                                  className="w-full p-1.5 rounded border border-muted/20 text-xs bg-white"
-                                >
-                                  {CHILD_DEPARTMENTS.map(d => (
-                                    <option key={d} value={d}>{d}</option>
-                                  ))}
-                                </select>
-                              </div>
+                              {/* Departamento da criança — acesso restrito a Admin e Secretaria */}
+                              {(isAdmin || isSecretary) && (
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[10px] font-bold text-muted mb-1 uppercase flex items-center gap-1">
+                                    Departamento da Criança
+                                    <span className="ml-1 text-[9px] bg-black/10 text-black/60 px-1.5 py-0.5 rounded font-mono">Admin/Sec</span>
+                                  </label>
+                                  <select
+                                    value={(child.departments && child.departments[0]) || 'Nenhum Departamento'}
+                                    onChange={(e) => {
+                                      const newChildren = [...(selectedMember.children || [])];
+                                      newChildren[idx].departments = [e.target.value];
+                                      setSelectedMember({ ...selectedMember, children: newChildren });
+                                    }}
+                                    className="w-full p-1.5 rounded border border-muted/20 text-xs bg-white"
+                                  >
+                                    {CHILD_DEPARTMENTS.map(d => (
+                                      <option key={d} value={d}>{d}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1087,6 +1093,30 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       <p className="text-sm font-bold text-primary">
                         {selectedMember.consecrationDate.split('-').reverse().join('/')}
                       </p>
+                    </div>
+                  )}
+
+                  {/* Departamento do filho, criança ou adolescente */}
+                  {selectedMember.children?.some(c => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento') && (
+                    <div className="pt-3 border-t border-primary/10 space-y-2">
+                      <p className="text-[10px] text-muted uppercase font-bold flex items-center gap-1.5">
+                        <span>👶 Departamento do Filho / Criança / Adolescente</span>
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {selectedMember.children
+                          .filter(c => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento')
+                          .map((c, cIdx) => (
+                            <div key={cIdx} className="p-2.5 bg-primary/5 rounded-lg border border-primary/10 flex items-center justify-between">
+                              <div>
+                                <p className="text-xs font-bold text-primary">{c.name || `Filho(a) #${cIdx + 1}`}</p>
+                                <p className="text-[10px] text-muted">Histórico infantil / adolescente</p>
+                              </div>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-secondary/15 text-secondary">
+                                {c.departments[0]}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   )}
                 </div>

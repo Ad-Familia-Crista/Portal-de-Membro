@@ -98,31 +98,11 @@ export const WorshipFrequencyPage: React.FC = () => {
     const to = from + PAGE_SIZE - 1;
 
     try {
-      let data: any = null;
-      let count: any = null;
-      let error: any = null;
-
-      const res = await supabase
+      const { data, count, error } = await supabase
         .from('worship_frequency')
         .select('id, cult_date, theme, speaker, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
         .order('cult_date', { ascending: false })
         .range(from, to);
-
-      data = res.data;
-      count = res.count;
-      error = res.error;
-
-      // Fallback gracioso caso a coluna speaker ainda não tenha sido criada no Supabase
-      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
-        const fallbackRes = await supabase
-          .from('worship_frequency')
-          .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance, created_at, updated_at', { count: 'exact' })
-          .order('cult_date', { ascending: false })
-          .range(from, to);
-        data = fallbackRes.data;
-        count = fallbackRes.count;
-        error = fallbackRes.error;
-      }
 
       if (error) {
         console.error('Erro ao buscar frequências:', error);
@@ -266,20 +246,10 @@ export const WorshipFrequencyPage: React.FC = () => {
     try {
       if (isEditing && editingId) {
         // Atualizar
-        let { error } = await supabase
+        const { error } = await supabase
           .from('worship_frequency')
           .update(recordPayload)
           .eq('id', editingId);
-
-        // Fallback caso a coluna speaker não exista ainda no Supabase
-        if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
-          const { speaker: _, ...fallbackPayload } = recordPayload;
-          const retryRes = await supabase
-            .from('worship_frequency')
-            .update(fallbackPayload)
-            .eq('id', editingId);
-          error = retryRes.error;
-        }
 
         if (error) throw error;
         
@@ -290,21 +260,11 @@ export const WorshipFrequencyPage: React.FC = () => {
         handleCancel();
         fetchRecords(currentPage, true);
       } else {
-        // Criar novo
-        let { error } = await supabase
+        const { error: insertError } = await supabase
           .from('worship_frequency')
           .insert([recordPayload]);
 
-        // Fallback caso a coluna speaker não exista ainda no Supabase
-        if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
-          const { speaker: _, ...fallbackPayload } = recordPayload;
-          const retryRes = await supabase
-            .from('worship_frequency')
-            .insert([fallbackPayload]);
-          error = retryRes.error;
-        }
-
-        if (error) throw error;
+        if (insertError) throw insertError;
 
         setSuccessMsg('Frequência registrada com sucesso!');
         // Invalidar caches compartilhados
@@ -337,25 +297,11 @@ export const WorshipFrequencyPage: React.FC = () => {
   const handleExportExcel = async () => {
     try {
       setExporting(true);
-      let data: any = null;
-      let error: any = null;
 
-      const res = await supabase
+      const { data, error } = await supabase
         .from('worship_frequency')
         .select('id, cult_date, theme, speaker, total_attendance, visitors_attendance, children_attendance')
         .order('cult_date', { ascending: false });
-
-      data = res.data;
-      error = res.error;
-
-      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
-        const fallbackRes = await supabase
-          .from('worship_frequency')
-          .select('id, cult_date, theme, total_attendance, visitors_attendance, children_attendance')
-          .order('cult_date', { ascending: false });
-        data = fallbackRes.data;
-        error = fallbackRes.error;
-      }
 
       if (error) throw error;
 
@@ -597,21 +543,9 @@ export const WorshipFrequencyPage: React.FC = () => {
       }));
 
       // Inserir ou atualizar via upsert na chave única (cult_date, theme)
-      let { error } = await supabase
+      const { error } = await supabase
         .from('worship_frequency')
         .upsert(payloads, { onConflict: 'cult_date, theme' });
-
-      // Fallback gracioso se a coluna speaker ainda não existir no banco
-      if (error && (error.message?.includes('speaker') || (error as any).code === '42703')) {
-        const payloadsWithoutSpeaker = payloads.map((p: any) => {
-          const { speaker: _, ...rest } = p;
-          return rest;
-        });
-        const retryRes = await supabase
-          .from('worship_frequency')
-          .upsert(payloadsWithoutSpeaker, { onConflict: 'cult_date, theme' });
-        error = retryRes.error;
-      }
 
       if (error) throw error;
 
