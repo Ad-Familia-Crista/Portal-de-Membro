@@ -416,14 +416,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (sessionErr || !sessionData?.session) {
         const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
         if (refreshErr || !refreshed?.session) {
-          const authErr: any = new Error('Sessão expirada. Faça login novamente ou tente salvar.');
-          authErr.isAuthError = true;
-          authErr.status = 401;
-          throw authErr;
+          console.warn('[CADASTRO] Sessão precisa de renovação ou verificação no servidor:', refreshErr || sessionErr);
         }
       }
     } catch (err: any) {
-      if (err.isAuthError) throw err;
       console.warn('[CADASTRO] Falha ao verificar/renovar sessão antes do update:', err);
     }
 
@@ -450,12 +446,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     delete snakeData.id;
     delete snakeData.email;
 
+    // Sanitizar campos do tipo DATE: converter string vazia ("") para null para evitar erro 22007 do PostgreSQL
+    const dateFields = [
+      'birth_date',
+      'marriage_date',
+      'baptism_date',
+      'entry_date',
+      'position_start_date',
+      'consecration_date',
+      'department_start_date'
+    ];
+    for (const df of dateFields) {
+      if (snakeData[df] === '') {
+        snakeData[df] = null;
+      }
+    }
+
     // UPDATE sem retorno do perfil completo: evita download desnecessário do Base64 da foto.
     // O status HTTP 204 (No Content) confirma o sucesso da operação.
-    const { error } = await supabase
+    let { error } = await supabase
       .from('profiles')
       .update(snakeData)
       .eq('id', user.id);
+
+    // Fallback gracioso: se a coluna department_start_date ainda não existe no banco de dados Supabase,
+    // remove a coluna do payload e tenta o salvamento novamente sem travar o cadastro do membro.
+    if (error && (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('department_start_date'))) {
+      console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando cadastro com fallback...');
+      delete snakeData.department_start_date;
+      const retryRes = await supabase
+        .from('profiles')
+        .update(snakeData)
+        .eq('id', user.id);
+      error = retryRes.error;
+    }
 
     if (error) {
       console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', error);

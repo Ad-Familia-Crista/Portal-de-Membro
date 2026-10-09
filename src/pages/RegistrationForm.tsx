@@ -528,7 +528,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       setValue('children', []);
       setChildCpfDbErrors({});
       setChildCpfValidating({});
-      Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+      Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t as any));
       childCpfTimersRef.current = {};
       cpfRequestIdRef.current = {};
     }
@@ -979,7 +979,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
           // Só executa se houver dependente pendente de validação
           if (needsValidation) {
             // Cancela timers pendentes para evitar concorrência com o nextStep
-            Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+            Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t as any));
             childCpfTimersRef.current = {};
 
             const checkPromises = currentChildren.map((ch, i) => validateChildCpfInDatabase(ch.cpf, i));
@@ -1287,7 +1287,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                               type="button" 
                               onClick={() => {
                                 // 1. Cancela todos os timers pendentes
-                                Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t));
+                                Object.values(childCpfTimersRef.current).forEach(t => clearTimeout(t as any));
                                 childCpfTimersRef.current = {};
 
                                 // 2. Invalida todos os request IDs para descartar qualquer requisição em voo iniciada antes da remoção
@@ -1299,9 +1299,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                                   Object.entries(prev).forEach(([k, msg]) => {
                                     const i = Number(k);
                                     if (i < index) {
-                                      next[i] = msg;
+                                      next[i] = msg as string;
                                     } else if (i > index) {
-                                      next[i - 1] = msg;
+                                      next[i - 1] = msg as string;
                                     }
                                   });
                                   return next;

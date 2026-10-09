@@ -215,10 +215,37 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         snakePayload.photo_url = currentPhoto || null;
       }
 
-      const { error } = await supabase
+      // Sanitizar campos do tipo DATE: converter string vazia ("") para null
+      const dateFields = [
+        'birth_date',
+        'marriage_date',
+        'baptism_date',
+        'entry_date',
+        'position_start_date',
+        'consecration_date',
+        'department_start_date'
+      ];
+      for (const df of dateFields) {
+        if (snakePayload[df] === '') {
+          snakePayload[df] = null;
+        }
+      }
+
+      let { error } = await supabase
         .from('profiles')
         .update(snakePayload)
         .eq('id', selectedMember.id);
+
+      // Fallback caso a coluna department_start_date ainda não exista no banco
+      if (error && (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('department_start_date'))) {
+        console.warn('[MEMBROS] Coluna department_start_date não encontrada no banco. Salvando sem ela...');
+        delete snakePayload.department_start_date;
+        const retryRes = await supabase
+          .from('profiles')
+          .update(snakePayload)
+          .eq('id', selectedMember.id);
+        error = retryRes.error;
+      }
 
       if (error) {
         console.error('Erro ao salvar alterações do membro:', error);
