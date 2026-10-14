@@ -191,36 +191,31 @@ interface RegistrationDraftData {
   fields: Record<string, any>;
 }
 
-// Sanitização estrita do rascunho em conformidade com segurança e LGPD
+// Sanitização do rascunho: preserva campos do formulário necessários para recuperação,
+// excluindo apenas credenciais, tokens, fotos em Base64 e metadados de sistema.
 const sanitizeDraftValues = (data: any) => {
   if (!data || typeof data !== 'object') return {};
   const {
-    // 1. NUNCA salvar dados de identificação sensíveis (já vêm protegidos do perfil)
-    cpf,
-    rg,
-    // 2. NUNCA salvar fotos em Base64 no localStorage (pesadas e de alto risco de cota)
+    // 1. NUNCA salvar fotos em Base64 no localStorage (pesadas e de alto risco de cota)
     photoUrl,
-    // 3. NUNCA salvar credenciais ou senhas
+    // 2. NUNCA salvar credenciais ou senhas
     password,
     token,
-    // 4. Campos administrativos ou metadados de sistema
+    // 3. Campos administrativos ou metadados de sistema — não pertencem ao formulário
     ministerialHistory,
     validUntil,
     lastUpdated,
     id,
     role,
     status,
+    // 4. CPF e RG são incluídos — são dados preenchidos pelo usuário no formulário e
+    //    essenciais para recuperar o rascunho. O localStorage é isolado por user.id.
     ...safeFields
   } = data;
 
-  // 5. NUNCA salvar CPF de dependentes/menores de idade no navegador
-  if (Array.isArray(safeFields.children)) {
-    safeFields.children = safeFields.children.map((child: any) => {
-      if (!child || typeof child !== 'object') return child;
-      const { cpf: childCpf, ...safeChild } = child;
-      return safeChild;
-    });
-  }
+  // 5. Preservar os CPFs dos filhos para recuperação do rascunho.
+  //    Estes valores são digitados pelo próprio usuário e necessários para retomar o formulário.
+  //    Não há exclusão de childCpf aqui.
 
   return safeFields;
 };
@@ -272,6 +267,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const isSubmittingRef = React.useRef(false);
   // Controle para inicializar o formulário apenas uma vez na carga do perfil
   const hasInitializedRef = React.useRef(false);
+  // Indica que um rascunho já foi aplicado (automaticamente ou pelo usuário).
+  // Enquanto false, os useEffects de limpeza condicional não apagam campos.
+  const draftAppliedRef = React.useRef(false);
   // Valor original da foto no momento da abertura do formulário.
   // Usado para detectar se a foto foi alterada e evitar reenvio desnecessário do Base64.
   const originalPhotoRef = React.useRef<string>(user?.photoUrl || '');
@@ -397,65 +395,89 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
   }, [user, reset]);
 
-  // 1. Verificar se há rascunho seguro e recuperável isolado para esta conta
+  // Utilitário interno: aplica os campos do rascunho no formulário via setValue.
+  // Usado tanto na restauração automática quanto na manual (banner).
+  const applyDraftFields = React.useCallback((fields: Record<string, any>, savedStep: number) => {
+    Object.entries(fields).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        setValue(key as any, value, { shouldDirty: true });
+      }
+    });
+    if (savedStep >= 1 && savedStep <= totalSteps) {
+      setStep(savedStep);
+    }
+    draftAppliedRef.current = true;
+  }, [setValue, setStep, totalSteps]);
+
+  // 1. Verificar rascunho no localStorage e aplicá-lo ao formulário
+  //
+  // Lógica de decisão:
+  //   - Rascunho expirado (> 7 dias)        → removido silenciosamente
+  //   - Banco mais recente que o rascunho   → rascunho obsoleto, removido
+  //   - Rascunho recente (< 1 hora)         → aplicado automaticamente (recarga acidental)
+  //   - Rascunho antigo (entre 1h e 7 dias) → exibe banner para o usuário decidir
   React.useEffect(() => {
     if (!user?.id) return;
     try {
       const draftKey = `draft_registration_${user.id}`;
       const rawDraft = localStorage.getItem(draftKey);
-      if (!rawDraft) return;
+      if (!rawDraft) {
+        // Sem rascunho: formulário já inicializado com dados do banco. Marca como aplicado.
+        draftAppliedRef.current = true;
+        return;
+      }
 
       const draft: RegistrationDraftData = JSON.parse(rawDraft);
       if (!draft || draft.userId !== user.id || !draft.savedAt || !draft.fields) {
+        draftAppliedRef.current = true;
         return;
       }
 
       // Expiração do rascunho (7 dias)
-      const draftAgeMs = Date.now() - new Date(draft.savedAt).getTime();
+      const now = Date.now();
+      const draftSavedMs = new Date(draft.savedAt).getTime();
+      const draftAgeMs = now - draftSavedMs;
       const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
       if (draftAgeMs > SEVEN_DAYS_MS || isNaN(draftAgeMs)) {
         localStorage.removeItem(draftKey);
+        draftAppliedRef.current = true;
         return;
       }
 
-      // Não sobrescrever se o banco de dados tiver alterações mais recentes que o rascunho
+      // Rascunho obsoleto: banco tem dados mais recentes
       const userLastUpdatedMs = user.lastUpdated ? new Date(user.lastUpdated).getTime() : 0;
-      const draftSavedMs = new Date(draft.savedAt).getTime();
       if (userLastUpdatedMs && userLastUpdatedMs >= draftSavedMs) {
         localStorage.removeItem(draftKey);
+        draftAppliedRef.current = true;
         return;
       }
 
-      // Se houver campos preenchidos no rascunho, disponibiliza para o usuário decidir
-      if (Object.keys(draft.fields).length > 0) {
+      if (Object.keys(draft.fields).length === 0) {
+        draftAppliedRef.current = true;
+        return;
+      }
+
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      if (draftAgeMs <= ONE_HOUR_MS) {
+        // Rascunho recente (< 1 hora): restauração automática e silenciosa.
+        // Cobre o caso mais comum: o usuário atualizou a página acidentalmente.
+        console.log('[RASCUNHO] Rascunho recente detectado. Restaurando automaticamente...');
+        applyDraftFields(draft.fields, draft.step);
+        showToast('Seus dados foram restaurados automaticamente.', 'info');
+      } else {
+        // Rascunho de sessão anterior (entre 1h e 7 dias): exibe banner para decidir.
         setDraftToRecover(draft);
       }
     } catch (err) {
       console.warn('[RASCUNHO] Erro ao carregar rascunho do localStorage:', err);
+      draftAppliedRef.current = true;
     }
-  }, [user?.id, user?.lastUpdated]);
+  }, [user?.id, user?.lastUpdated, applyDraftFields, showToast]);
 
   const handleRecoverDraft = () => {
     if (!draftToRecover) return;
     const { fields, step: savedStep } = draftToRecover;
-
-    Object.entries(fields).forEach(([key, value]) => {
-      if (key === 'children' && Array.isArray(value)) {
-        const currentChildren = getValues('children') || [];
-        const mergedChildren = value.map((child: any, idx: number) => ({
-          ...child,
-          cpf: currentChildren[idx]?.cpf || child.cpf || '',
-        }));
-        setValue('children', mergedChildren, { shouldDirty: true });
-      } else if (value !== undefined && value !== null) {
-        setValue(key as any, value, { shouldDirty: true });
-      }
-    });
-
-    if (savedStep && savedStep >= 1 && savedStep <= totalSteps) {
-      setStep(savedStep);
-    }
-
+    applyDraftFields(fields, savedStep);
     setDraftToRecover(null);
     showToast('Rascunho recuperado com sucesso!', 'info');
   };
@@ -466,6 +488,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         localStorage.removeItem(`draft_registration_${user.id}`);
       } catch {}
     }
+    draftAppliedRef.current = true;
     setDraftToRecover(null);
     showToast('Rascunho descartado.', 'info');
   };
@@ -488,9 +511,27 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const watchPhotoUrl = watch('photoUrl');
   const watchedValues = watch();
 
-  // 2. Debounce de 2.5s para gravação segura e isolada do rascunho no localStorage
+  // Salva o rascunho imediatamente (síncrono) — usado antes de mudar etapa ou ao desmontar.
+  const saveDraftNow = React.useCallback(() => {
+    if (!user?.id || !hasInitializedRef.current || !draftAppliedRef.current) return;
+    try {
+      const currentValues = getValues();
+      const safeFields = sanitizeDraftValues(currentValues);
+      const draftPayload: RegistrationDraftData = {
+        userId: user.id,
+        step,
+        savedAt: new Date().toISOString(),
+        fields: safeFields,
+      };
+      localStorage.setItem(`draft_registration_${user.id}`, JSON.stringify(draftPayload));
+    } catch (e) {
+      console.warn('[RASCUNHO] Erro ao salvar rascunho imediato:', e);
+    }
+  }, [user?.id, step, getValues]);
+
+  // 2. Debounce de 2.5s para gravação automática do rascunho enquanto o usuário digita
   React.useEffect(() => {
-    if (!user?.id || !hasInitializedRef.current || isSubmittingForm || draftToRecover !== null) {
+    if (!user?.id || !hasInitializedRef.current || isSubmittingForm || draftToRecover !== null || !draftAppliedRef.current) {
       return;
     }
 
@@ -515,8 +556,21 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     return () => clearTimeout(timer);
   }, [watchedValues, step, user?.id, isSubmittingForm, draftToRecover]);
 
-  // Limpeza de dados residuais para evitar erros de validação em campos escondidos
+  // 3. Salvar rascunho ao fechar ou recarregar a página (F5, fechar aba)
+  //    Garante que os dados dos últimos 2,5s não sejam perdidos antes do debounce disparar.
   React.useEffect(() => {
+    const handleBeforeUnload = () => {
+      saveDraftNow();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [saveDraftNow]);
+
+  // Limpeza de dados residuais para evitar erros de validação em campos escondidos.
+  // GUARDA: só executa após o rascunho ter sido aplicado (draftAppliedRef.current === true),
+  // evitando que os efeitos apaguem campos que serão restaurados pelo rascunho.
+  React.useEffect(() => {
+    if (!draftAppliedRef.current) return;
     if (maritalStatus !== 'Casado' && step === 2) {
       setValue('marriageDate', '');
       setValue('spouseName', '');
@@ -524,6 +578,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   }, [maritalStatus, setValue, step]);
 
   React.useEffect(() => {
+    if (!draftAppliedRef.current) return;
     if (hasChildren === 'Não' && step === 2) {
       setValue('children', []);
       setChildCpfDbErrors({});
@@ -1010,7 +1065,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
           }
         }
 
-        // Etapa 2 validada com sucesso! Avanço imediato em 0ms
+        // Etapa 2 validada com sucesso! Salva rascunho e avança.
+        saveDraftNow();
         setStep(3);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
@@ -1035,6 +1091,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       const isStepValid = await trigger(fieldsToValidate as any);
 
       if (isStepValid) {
+        // Salva rascunho de forma síncrona antes de mudar a etapa.
+        saveDraftNow();
         setStep(s => Math.min(s + 1, totalSteps));
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
@@ -1049,6 +1107,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   };
 
   const prevStep = () => {
+    // Salva o rascunho de forma síncrona antes de mudar de etapa.
+    // Garante que os dados da etapa atual não sejam perdidos se o debounce ainda não disparou.
+    saveDraftNow();
     setStep(s => Math.max(s - 1, 1));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
