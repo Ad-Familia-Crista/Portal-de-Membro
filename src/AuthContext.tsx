@@ -9,7 +9,7 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<void>;
   register: (data: any) => Promise<void>;
   logout: () => void;
-  updateUser: (data: Partial<Member>) => Promise<void>;
+  updateUser: (data: Partial<Member>) => Promise<Member>;
   isLoading: boolean;
   isPasswordRecovery: boolean;
   clearPasswordRecovery: () => Promise<void>;
@@ -174,9 +174,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (error) {
           console.error('Erro ao buscar perfil:', error);
-          const cached = localStorage.getItem('auth_user');
-          if (cached) {
-            try { return JSON.parse(cached); } catch {}
+          // Se o banco confirmou que o registro não existe (PGRST116), limpa cache obsoleto
+          if (error.code === 'PGRST116') {
+            try { localStorage.removeItem('auth_user'); } catch {}
+            return null;
+          }
+          // Em caso de falha de conexão offline, permite cache para resiliência temporária
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            const cached = localStorage.getItem('auth_user');
+            if (cached) {
+              try { return JSON.parse(cached); } catch {}
+            }
           }
           return null;
         }
@@ -407,21 +415,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateUser = async (data: Partial<Member>) => {
-    if (!user) return;
-    
-    // 1) Verificar e renovar sessão antes do UPDATE caso tenha expirado durante preenchimento prolongado
+  const updateUser = async (data: Partial<Member>): Promise<Member> => {
+    // 1) Obter e validar a sessão atualizada do Supabase
+    let session: any = null;
     try {
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr || !sessionData?.session) {
+      session = sessionData?.session;
+      if (sessionErr || !session) {
         const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr || !refreshed?.session) {
-          console.warn('[CADASTRO] Sessão precisa de renovação ou verificação no servidor:', refreshErr || sessionErr);
+        if (refreshed?.session) {
+          session = refreshed.session;
         }
       }
     } catch (err: any) {
-      console.warn('[CADASTRO] Falha ao verificar/renovar sessão antes do update:', err);
+      console.warn('[CADASTRO] Falha ao verificar/renovar sessão antes do salvamento:', err);
     }
+
+    // REGRA DE SEGURANÇA: Exige estritamente sessão ativa com ID validado pelo Supabase Auth.
+    // Nunca utilizar user?.id ou localStorage como substituto de uma sessão autenticada.
+    if (!session?.user?.id) {
+      const authErr: any = new Error('Sessão expirada ou não autenticada. Faça login novamente para salvar o cadastro.');
+      authErr.isAuthError = true;
+      authErr.status = 401;
+      throw authErr;
+    }
+
+    const currentUserId = session.user.id;
+    const currentUserEmail = session.user.email || '';
 
     const now = new Date();
     // Validade de 1 ano e 6 meses após a atualização
@@ -429,22 +449,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     validUntilDate.setMonth(validUntilDate.getMonth() + 18);
 
     const updatedUser: Member = {
-      ...user,
+      ...(user || { id: currentUserId, email: currentUserEmail, role: 'MEMBER', status: 'ACTIVE' }),
       ...data,
+      id: currentUserId,
+      email: currentUserEmail,
       lastUpdated: now.toISOString(),
       validUntil: validUntilDate.toISOString().split('T')[0]
     };
 
-    // 2) Persiste no Supabase PRIMEIRO (sem atualização otimista prematura)
+    // 2) Preparar payload em snake_case para o Supabase
     const snakeData = toSnake({
       ...data,
       lastUpdated: updatedUser.lastUpdated,
       validUntil: updatedUser.validUntil
     });
 
-    // Remover campos que não devem ser sobrescritos
+    // Remover campos de identidade e permissões administrativas para que nunca sejam manipulados pelo formulário
     delete snakeData.id;
     delete snakeData.email;
+    delete snakeData.role;
+    delete snakeData.status;
 
     // Sanitizar campos do tipo DATE: converter string vazia ("") para null para evitar erro 22007 do PostgreSQL
     const dateFields = [
@@ -462,45 +486,112 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // UPDATE sem retorno do perfil completo: evita download desnecessário do Base64 da foto.
-    // O status HTTP 204 (No Content) confirma o sucesso da operação.
-    let { error } = await supabase
+    // 3) Verificar se o registro já existe na tabela profiles
+    const { data: existingProfile, error: checkError } = await supabase
       .from('profiles')
-      .update(snakeData)
-      .eq('id', user.id);
+      .select('id, role, status')
+      .eq('id', currentUserId)
+      .maybeSingle();
 
-    // Fallback gracioso: se a coluna department_start_date ainda não existe no banco de dados Supabase,
-    // remove a coluna do payload e tenta o salvamento novamente sem travar o cadastro do membro.
-    if (error && (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('department_start_date'))) {
-      console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando cadastro com fallback...');
-      delete snakeData.department_start_date;
-      const retryRes = await supabase
-        .from('profiles')
-        .update(snakeData)
-        .eq('id', user.id);
-      error = retryRes.error;
-    }
-
-    if (error) {
-      console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', error);
-      const msg = (error.message || '').toLowerCase();
-      if (error.code === 'PGRST301' || msg.includes('jwt') || msg.includes('token') || msg.includes('expired') || (error as any).status === 401) {
+    if (checkError) {
+      console.warn('[CADASTRO] Aviso ao verificar existência prévia de perfil:', checkError);
+      const msg = (checkError.message || '').toLowerCase();
+      if (checkError.code === 'PGRST301' || msg.includes('jwt') || msg.includes('token') || msg.includes('expired')) {
         const authErr: any = new Error('Sessão expirada no banco');
         authErr.isAuthError = true;
         authErr.status = 401;
-        authErr.originalError = error;
+        authErr.originalError = checkError;
         throw authErr;
       }
-      throw error;
     }
 
-    // 2) SOMENTE após a confirmação real do banco de dados:
-    // Constrói o estado local a partir dos dados que já temos — sem depender do retorno do Supabase.
-    // 'data' está em camelCase (vem do formulário já formatado).
-    // A mesclagem garante que campos como id, email, role e ministerialHistory não sejam perdidos.
+    let resultRow: { id: string } | null = null;
+    let persistenceError: any = null;
+
+    if (existingProfile) {
+      // CENÁRIO A: Perfil existente -> executa UPDATE seguro com confirmação de linha modificada
+      // role e status nunca são modificados durante a atualização cadastral
+      let updateRes = await supabase
+        .from('profiles')
+        .update(snakeData)
+        .eq('id', currentUserId)
+        .select('id');
+
+      // Fallback gracioso: coluna department_start_date ausente no banco
+      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703' || updateRes.error.message?.includes('department_start_date'))) {
+        console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando update com fallback...');
+        delete snakeData.department_start_date;
+        updateRes = await supabase
+          .from('profiles')
+          .update(snakeData)
+          .eq('id', currentUserId)
+          .select('id');
+      }
+
+      persistenceError = updateRes.error;
+      const dataArr = updateRes.data as { id: string }[] | null;
+      resultRow = dataArr && dataArr.length > 0 ? dataArr[0] : null;
+    } else {
+      // CENÁRIO B: Usuário autenticado sem perfil -> cria o registro via UPSERT seguro
+      // role: 'MEMBER' e status: 'ACTIVE' são definidos como valores fixos controlados pelo sistema,
+      // posicionados APÓS ...snakeData para impossibilitar sobrescrita.
+      console.log('[CADASTRO] Perfil ausente na tabela profiles. Criando novo registro para usuário autenticado...');
+      const insertPayload: any = {
+        ...snakeData,
+        id: currentUserId,
+        email: currentUserEmail,
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        first_name: user?.firstName || session?.user?.user_metadata?.first_name || ''
+      };
+
+      let upsertRes = await supabase
+        .from('profiles')
+        .upsert(insertPayload, { onConflict: 'id' })
+        .select('id');
+
+      // Fallback gracioso: coluna department_start_date ausente no banco
+      if (upsertRes.error && (upsertRes.error.code === 'PGRST204' || upsertRes.error.code === '42703' || upsertRes.error.message?.includes('department_start_date'))) {
+        console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando upsert com fallback...');
+        delete insertPayload.department_start_date;
+        upsertRes = await supabase
+          .from('profiles')
+          .upsert(insertPayload, { onConflict: 'id' })
+          .select('id');
+      }
+
+      persistenceError = upsertRes.error;
+      const dataArr = upsertRes.data as { id: string }[] | null;
+      resultRow = dataArr && dataArr.length > 0 ? dataArr[0] : null;
+    }
+
+    if (persistenceError) {
+      console.error('[CADASTRO] Erro ao sincronizar perfil no Supabase:', persistenceError);
+      const msg = (persistenceError.message || '').toLowerCase();
+      if (persistenceError.code === 'PGRST301' || msg.includes('jwt') || msg.includes('token') || msg.includes('expired') || (persistenceError as any).status === 401) {
+        const authErr: any = new Error('Sessão expirada no banco');
+        authErr.isAuthError = true;
+        authErr.status = 401;
+        authErr.originalError = persistenceError;
+        throw authErr;
+      }
+      throw persistenceError;
+    }
+
+    // VALIDAÇÃO CRÍTICA: Se nenhuma linha foi retornada pelo select('id'), o registro NÃO foi gravado
+    if (!resultRow || resultRow.id !== currentUserId) {
+      console.error('[CADASTRO] Falha de persistência: Supabase não retornou a linha gravada.', { resultRow, currentUserId });
+      throw new Error('Falha ao gravar no banco de dados. O registro não foi confirmado pelo servidor.');
+    }
+
+    // 4) SOMENTE após a confirmação real do banco de dados:
     const finalUser: Member = {
-      ...user,
+      ...(user || { id: currentUserId, email: currentUserEmail, role: 'MEMBER', status: 'ACTIVE' }),
       ...data,
+      id: currentUserId,
+      email: currentUserEmail,
+      role: existingProfile?.role || 'MEMBER',
+      status: existingProfile?.status || 'ACTIVE',
       validUntil: updatedUser.validUntil,
       lastUpdated: updatedUser.lastUpdated
     };

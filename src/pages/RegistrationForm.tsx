@@ -814,24 +814,28 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         console.log(`[CADASTRO] photo_url incluida no payload: ${photoKbSent !== '0' ? `${photoKbSent} KB` : 'removida (vazia)'}`);
       }
 
-      // 5. Execucao do UPDATE no Supabase
-      console.log('[CADASTRO] Antes do update Supabase');
+      // 5. Execução da persistência no Supabase com confirmação de gravação
+      console.log('[CADASTRO] Antes de persistir no Supabase');
       const tSupabaseStart = performance.now();
-      await updateUser(payloadData);
+      const savedUser = await updateUser(payloadData);
       const tSupabaseEnd = performance.now();
       console.log(`[CADASTRO] Supabase respondeu com sucesso: ${(tSupabaseEnd - tSupabaseStart).toFixed(1)} ms`);
 
-      // 6. Se a foto foi enviada com sucesso, atualiza a referencia original
-      // para que um segundo salvamento sem nova alteracao tambem omita corretamente.
+      if (!savedUser || !savedUser.id) {
+        throw new Error('A gravação do cadastro não foi confirmada pelo banco de dados.');
+      }
+
+      // 6. Se a foto foi enviada com sucesso, atualiza a referência original
       if (payloadData.photoUrl !== undefined) {
         originalPhotoRef.current = payloadData.photoUrl;
       }
 
-      // 5. Confirmação real do banco obtida com sucesso:
-      showToast('Cadastro atualizado com sucesso!', 'success');
+      // 7. Confirmação real do banco obtida com sucesso:
+      showToast('Cadastro salvo com sucesso no banco de dados!', 'success');
       try {
-        if (user?.id) {
-          localStorage.removeItem(`draft_registration_${user.id}`);
+        const userIdToRemove = savedUser.id || user?.id;
+        if (userIdToRemove) {
+          localStorage.removeItem(`draft_registration_${userIdToRemove}`);
         }
         localStorage.removeItem('portal_registration_step');
       } catch {}
@@ -881,7 +885,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         );
       } else {
         showToast(
-          'Não foi possível salvar seu cadastro. Seus dados continuam preservados no formulário. Verifique as informações e tente novamente.',
+          error?.message && error.message.length < 150
+            ? error.message
+            : 'Não foi possível salvar seu cadastro no banco de dados. Seus dados continuam preservados no formulário. Verifique as informações e tente novamente.',
           'error'
         );
       }
