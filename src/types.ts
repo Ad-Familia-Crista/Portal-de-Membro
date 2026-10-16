@@ -111,6 +111,7 @@ export interface Member {
   currentPosition: string;
   positionStartDate: string;
   departments: string[];
+  departmentRoles?: Record<string, string>; // Mapeia "Nome do Departamento" -> Papel ("Membro", "Líder", "Vice-Líder", "Coordenador", "Regente")
   departmentStartDate?: string; // Data de entrada no departamento atual
   leaderDepartment?: string;
   
@@ -131,6 +132,25 @@ export interface Member {
   ip_aceite?: string;
   data_recusa?: string;
 }
+
+export const ALL_DEPT_ROLES = [
+  'Integrante',
+  'Líder',
+  'Vice-Líder',
+  'Coordenador',
+  'Regente'
+] as const;
+
+export type DeptRole = typeof ALL_DEPT_ROLES[number];
+
+export const LEADERSHIP_ROLES = [
+  'Líder',
+  'Vice-Líder',
+  'Coordenador',
+  'Regente'
+] as const;
+
+export type LeadershipRole = typeof LEADERSHIP_ROLES[number];
 
 export const DEPARTMENTS = [
   'Dep. The Search',

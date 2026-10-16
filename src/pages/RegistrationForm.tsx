@@ -14,6 +14,8 @@ import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loa
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 import { ImageCropperModal } from '../components/ImageCropperModal';
+import { MinisterialEvolutionView } from '../components/MinisterialEvolutionView';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 
 const schema = z.object({
   firstName: z.string().min(1, 'Nome completo é obrigatório'),
@@ -77,6 +79,8 @@ const schema = z.object({
 
   receivedAs: z.enum(['MEMBRO', 'CONGREGADO']).optional(),
   departments: z.array(z.string()).optional(),
+  departmentRoles: z.record(z.string(), z.string()).optional(),
+  leaderDepartment: z.string().optional(),
   currentPosition: z.string().optional(),
   positionStartDate: z.string().optional(),
   departmentStartDate: z.string().optional(),
@@ -201,13 +205,22 @@ const sanitizeDraftValues = (data: any) => {
     // 2. NUNCA salvar credenciais ou senhas
     password,
     token,
-    // 3. Campos administrativos ou metadados de sistema — não pertencem ao formulário
+    // 3. Campos administrativos ou metadados de sistema — não pertencem ao formulário do membro
     ministerialHistory,
     validUntil,
     lastUpdated,
     id,
     role,
     status,
+    departmentRoles,
+    leaderDepartment,
+    departments,
+    currentPosition,
+    positionStartDate,
+    departmentStartDate,
+    consecratedTo,
+    consecrationDate,
+    receivedAs,
     // 4. CPF e RG são incluídos — são dados preenchidos pelo usuário no formulário e
     //    essenciais para recuperar o rascunho. O localStorage é isolado por user.id.
     ...safeFields
@@ -328,6 +341,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       })) || [],
       phones: user?.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
       departments: user?.departments || [],
+      departmentRoles: user?.departmentRoles || {},
       departmentStartDate: user?.departmentStartDate || '',
       currentPosition: user?.currentPosition || 'Membro',
       positionStartDate: user?.positionStartDate || new Date().toISOString().split('T')[0],
@@ -386,19 +400,37 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         })) || [],
         phones: user.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
         departments: user.departments || [],
+        departmentRoles: user.departmentRoles || {},
         departmentStartDate: user.departmentStartDate || '',
         currentPosition: user.currentPosition || 'Membro',
         positionStartDate: user.positionStartDate || new Date().toISOString().split('T')[0],
         ministerialHistory: user.ministerialHistory || [],
         photoUrl: user.photoUrl || '',
       });
+    } else if (user && hasInitializedRef.current) {
+      // Sincroniza campos ministeriais e dados frescos quando o perfil for recarregado do banco
+      setValue('departments', user.departments || []);
+      setValue('departmentRoles', user.departmentRoles || {});
+      setValue('leaderDepartment', user.leaderDepartment || '');
+      setValue('currentPosition', user.currentPosition || 'Membro');
+      setValue('consecratedTo', user.consecratedTo || '');
+      setValue('consecrationDate', user.consecrationDate || '');
+      setValue('receivedAs', (user.receivedAs === 'MEMBRO' || user.receivedAs === 'CONGREGADO') ? user.receivedAs : undefined);
+      setValue('ministerialHistory', user.ministerialHistory || []);
     }
-  }, [user, reset]);
+  }, [user, reset, setValue]);
 
   // Utilitário interno: aplica os campos do rascunho no formulário via setValue.
   // Usado tanto na restauração automática quanto na manual (banner).
   const applyDraftFields = React.useCallback((fields: Record<string, any>, savedStep: number) => {
+    const ADMIN_ONLY_FIELDS = new Set([
+      'departmentRoles', 'leaderDepartment', 'departments', 'currentPosition',
+      'positionStartDate', 'departmentStartDate', 'consecratedTo', 'consecrationDate',
+      'receivedAs', 'ministerialHistory'
+    ]);
+
     Object.entries(fields).forEach(([key, value]) => {
+      if (ADMIN_ONLY_FIELDS.has(key)) return;
       if (value !== undefined && value !== null) {
         setValue(key as any, value, { shouldDirty: true });
       }
@@ -1266,7 +1298,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                     <option value="Solteiro">Solteiro(a)</option>
                     <option value="Casado">Casado(a)</option>
                     <option value="Viúvo">Viúvo(a)</option>
-                    <option value="Separado">Separado(a)</option>
+                    <option value="Separado(a)/Divorciado(a)">Separado(a)/Divorciado(a)</option>
+                    {watch('maritalStatus') === 'Separado' && (
+                      <option value="Separado">Separado(a)/Divorciado(a)</option>
+                    )}
                   </select>
                   {errors.maritalStatus && <p className="text-xs text-red-500 font-medium">{errors.maritalStatus.message}</p>}
                 </div>
@@ -1854,134 +1889,16 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
               <div className="space-y-6">
                 {/* Summary for Member */}
                 {!isAdminOrSecretary && (
-                  <div className="space-y-6">
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-700">
-                      <ShieldAlert className="w-5 h-5 flex-shrink-0" />
-                      <p className="text-xs font-medium">Esta seção é de preenchimento exclusivo da Secretaria ou Administrador. Seus dados atuais estão visíveis abaixo apenas para conferência.</p>
-                    </div>
-
-                    <div className="bg-black/5 p-4 rounded-xl border border-black/10 space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Cargo Atual</p>
-                          <p className="text-sm font-bold text-black">{watch('currentPosition') || 'Membro'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Tempo no Cargo</p>
-                          <p className="text-sm font-bold text-black">
-                            {(() => {
-                              const startStr = watch('positionStartDate');
-                              if (!startStr) return 'N/A';
-                              const start = new Date(startStr);
-                              const now = new Date();
-                              const diffTime = Math.abs(now.getTime() - start.getTime());
-                              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                              const years = Math.floor(diffDays / 365);
-                              const months = Math.floor((diffDays % 365) / 30);
-                              return `${years} anos e ${months} meses`;
-                            })()}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Consagrado a</p>
-                          <p className="text-sm font-bold text-black">{watch('consecratedTo') || 'Não informado'}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-black/10">
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Departamento(s)</p>
-                          <p className="text-sm font-bold text-black">
-                            {watch('departments')?.length > 0 ? watch('departments').join(', ') : 'Nenhum Departamento'}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Data de Entrada no Depto.</p>
-                          <p className="text-sm font-bold text-black">
-                            {watch('departmentStartDate')
-                              ? watch('departmentStartDate').split('-').reverse().join('/')
-                              : 'Não informada'}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] text-muted uppercase font-bold">Tempo no Departamento</p>
-                          <p className="text-sm font-bold text-black">
-                            {(() => {
-                              const deptStart = watch('departmentStartDate');
-                              if (!deptStart) return 'N/A';
-                              const start = new Date(deptStart);
-                              const now = new Date();
-                              const diffMs = now.getTime() - start.getTime();
-                              const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                              const years = Math.floor(totalDays / 365);
-                              const months = Math.floor((totalDays % 365) / 30);
-                              const days = totalDays % 30;
-                              return `${years > 0 ? `${years} ano(s) ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`.trim() || 'Recente';
-                            })()}
-                          </p>
-                        </div>
-                      </div>
-
-                      {watch('consecrationDate') && (
-                        <div className="pt-2 border-t border-black/10">
-                          <p className="text-[10px] text-muted uppercase font-bold">Data da Consagração</p>
-                          <p className="text-sm font-bold text-black">
-                            {watch('consecrationDate').split('-').reverse().join('/')}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Departamento do filho, criança ou adolescente */}
-                      {watch('children')?.some((c: any) => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento') && (
-                        <div className="pt-3 border-t border-black/10 space-y-2">
-                          <p className="text-[10px] text-muted uppercase font-bold flex items-center gap-1.5">
-                            <span>👶 Departamento do Filho / Criança / Adolescente</span>
-                          </p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {watch('children')
-                              .filter((c: any) => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento')
-                              .map((c: any, cIdx: number) => (
-                                <div key={cIdx} className="p-2.5 bg-black/5 rounded-lg border border-black/10 flex items-center justify-between">
-                                  <div>
-                                    <p className="text-xs font-bold text-black">{c.name || `Filho(a) #${cIdx + 1}`}</p>
-                                    <p className="text-[10px] text-muted">Vínculo infantil / adolescente</p>
-                                  </div>
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-secondary/15 text-secondary">
-                                    {c.departments[0]}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-4 pt-4 border-t border-muted/5">
-                      <h5 className="text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
-                        <History className="w-3 h-3" /> Histórico Ministerial
-                      </h5>
-                      <div className="relative pl-4 space-y-6 before:absolute before:left-[7px] before:top-2 before:bottom-2 before:w-0.5 before:bg-muted/10">
-                        {watch('ministerialHistory')?.length > 0 ? (
-                          watch('ministerialHistory').map((event: any) => (
-                            <div key={event.id} className="relative">
-                              <div className="absolute -left-[13px] top-1.5 w-3 h-3 rounded-full bg-secondary border-2 border-white shadow-sm" />
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs font-bold text-black">
-                                    📅 {new Date(event.date).getFullYear()}
-                                  </span>
-                                  <span className="text-[10px] text-muted font-mono">{event.date}</span>
-                                </div>
-                                <p className="text-sm text-black font-medium">{event.description}</p>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-xs text-muted italic">Nenhum histórico registrado.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <MinisterialEvolutionView
+                    departments={user?.departments || watch('departments') || []}
+                    departmentRoles={user?.departmentRoles || watch('departmentRoles') || {}}
+                    leaderDepartment={user?.leaderDepartment || watch('leaderDepartment') || ''}
+                    consecratedTo={user?.consecratedTo || watch('consecratedTo') || ''}
+                    consecrationDate={user?.consecrationDate || watch('consecrationDate') || ''}
+                    children={watch('children') || user?.children || []}
+                    ministerialHistory={user?.ministerialHistory || watch('ministerialHistory') || []}
+                    showNotice={true}
+                  />
                 )}
 
                 {/* Admin Edit Form */}
@@ -2018,55 +1935,26 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-semibold text-black">Departamento Atual (Múltipla escolha)</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                        {[
-                          ...DEPARTMENTS,
-                          ...(watch('departments') || []).filter((d: string) => !DEPARTMENTS.includes(d) && d !== '')
-                        ].map(dept => (
-                          <label key={dept} className="flex items-center gap-2 text-xs p-2 bg-background/50 rounded border border-muted/10 cursor-pointer">
-                            <input type="checkbox" value={dept} {...register('departments')} className="w-3 h-3 accent-black" />
-                            {dept}
-                          </label>
-                        ))}
-                      </div>
-                      {/* Campo para adicionar departamento personalizado */}
-                      <div className="flex gap-2 mt-2">
-                        <input
-                          type="text"
-                          placeholder="Adicionar outro departamento..."
-                          value={customDeptInput}
-                          onChange={(e) => setCustomDeptInput(e.target.value)}
-                          className="flex-1 p-2 rounded border border-muted/20 text-xs"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && customDeptInput.trim()) {
-                              e.preventDefault();
-                              const trimmed = customDeptInput.trim();
-                              const current = watch('departments') || [];
-                              if (!current.includes(trimmed)) {
-                                setValue('departments', [...current, trimmed]);
-                              }
-                              setCustomDeptInput('');
-                            }
+                    <Controller
+                      name="departments"
+                      control={control}
+                      render={({ field }) => (
+                        <DepartmentSelect
+                          selectedDepartments={field.value || []}
+                          departmentRoles={watch('departmentRoles') || {}}
+                          onChange={(nextDepts, nextRoles) => {
+                            setValue('departments', nextDepts, { shouldDirty: true });
+                            setValue('departmentRoles', nextRoles, { shouldDirty: true });
+                            // Sincroniza leaderDepartment para compatibilidade retroativa
+                            const leaderships = Object.entries(nextRoles)
+                              .filter(([_, r]) => r !== 'Membro')
+                              .map(([d, r]) => `${r} - ${d}`);
+                            setValue('leaderDepartment', leaderships.join(', '), { shouldDirty: true });
                           }}
+                          error={errors.departments?.message as string}
                         />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const trimmed = customDeptInput.trim();
-                            const current = watch('departments') || [];
-                            if (trimmed && !current.includes(trimmed)) {
-                              setValue('departments', [...current, trimmed]);
-                            }
-                            setCustomDeptInput('');
-                          }}
-                          className="px-3 py-1.5 bg-black text-white text-xs font-bold rounded hover:bg-black/80 whitespace-nowrap"
-                        >
-                          + Adicionar
-                        </button>
-                      </div>
-                    </div>
+                      )}
+                    />
 
                     {/* Data de Entrada no Departamento */}
                     <div className="pt-3 border-t border-muted/10">

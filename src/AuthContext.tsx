@@ -470,6 +470,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     delete snakeData.role;
     delete snakeData.status;
 
+    // Se o usuário não for ADMIN nem SECRETARY, nunca permitir que a atualização do membro comum
+    // sobrescreva os campos de evolução ministerial definidos pela secretaria no banco
+    if (user?.role !== 'ADMIN' && user?.role !== 'SECRETARY') {
+      delete snakeData.department_roles;
+      delete snakeData.leader_department;
+      delete snakeData.departments;
+      delete snakeData.current_position;
+      delete snakeData.position_start_date;
+      delete snakeData.department_start_date;
+      delete snakeData.consecrated_to;
+      delete snakeData.consecration_date;
+      delete snakeData.received_as;
+      delete snakeData.ministerial_history;
+    }
+
     // Sanitizar campos do tipo DATE: converter string vazia ("") para null para evitar erro 22007 do PostgreSQL
     const dateFields = [
       'birth_date',
@@ -517,10 +532,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', currentUserId)
         .select('id');
 
-      // Fallback gracioso: coluna department_start_date ausente no banco
-      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703' || updateRes.error.message?.includes('department_start_date'))) {
-        console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando update com fallback...');
+      // Fallback gracioso: coluna department_start_date ou department_roles ausente no banco
+      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703' || updateRes.error.message?.includes('department_start_date') || updateRes.error.message?.includes('department_roles'))) {
+        console.warn('[CADASTRO] Coluna ausente no banco (department_start_date ou department_roles). Salvando update com fallback...');
         delete snakeData.department_start_date;
+        delete snakeData.department_roles;
         updateRes = await supabase
           .from('profiles')
           .update(snakeData)
@@ -550,10 +566,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .upsert(insertPayload, { onConflict: 'id' })
         .select('id');
 
-      // Fallback gracioso: coluna department_start_date ausente no banco
-      if (upsertRes.error && (upsertRes.error.code === 'PGRST204' || upsertRes.error.code === '42703' || upsertRes.error.message?.includes('department_start_date'))) {
-        console.warn('[CADASTRO] Coluna department_start_date não encontrada no banco. Salvando upsert com fallback...');
+      // Fallback gracioso: coluna department_start_date ou department_roles ausente no banco
+      if (upsertRes.error && (upsertRes.error.code === 'PGRST204' || upsertRes.error.code === '42703' || upsertRes.error.message?.includes('department_start_date') || upsertRes.error.message?.includes('department_roles'))) {
+        console.warn('[CADASTRO] Coluna ausente no banco (department_start_date ou department_roles). Salvando upsert com fallback...');
         delete insertPayload.department_start_date;
+        delete insertPayload.department_roles;
         upsertRes = await supabase
           .from('profiles')
           .upsert(insertPayload, { onConflict: 'id' })
@@ -585,13 +602,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // 4) SOMENTE após a confirmação real do banco de dados:
+    const isMemberRole = user?.role !== 'ADMIN' && user?.role !== 'SECRETARY';
     const finalUser: Member = {
       ...(user || { id: currentUserId, email: currentUserEmail, role: 'MEMBER', status: 'ACTIVE' }),
       ...data,
+      ...(isMemberRole ? {
+        departments: user?.departments || [],
+        departmentRoles: user?.departmentRoles || {},
+        leaderDepartment: user?.leaderDepartment || '',
+        currentPosition: user?.currentPosition || 'Membro',
+        positionStartDate: user?.positionStartDate || '',
+        departmentStartDate: user?.departmentStartDate || '',
+        consecratedTo: user?.consecratedTo || '',
+        consecrationDate: user?.consecrationDate || '',
+        receivedAs: user?.receivedAs || 'MEMBRO',
+        ministerialHistory: user?.ministerialHistory || [],
+      } : {}),
       id: currentUserId,
       email: currentUserEmail,
-      role: existingProfile?.role || 'MEMBER',
-      status: existingProfile?.status || 'ACTIVE',
+      role: existingProfile?.role || user?.role || 'MEMBER',
+      status: existingProfile?.status || user?.status || 'ACTIVE',
       validUntil: updatedUser.validUntil,
       lastUpdated: updatedUser.lastUpdated
     };

@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, UserRole, DEPARTMENTS, CHILD_DEPARTMENTS, CONSECRATIONS, POSITIONS, MinisterialEvent } from '../types';
+import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, MinisterialEvent } from '../types';
 import {
   Search,
   Edit2,
@@ -22,12 +22,14 @@ import {
 } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { supabase } from '../lib/supabase';
-import { toSnake, toCamel } from '../lib/mapper';
+import { toCamel } from '../lib/mapper';
 import { optimizeImage } from '../lib/imageOptimizer';
 import { MemberTableSkeleton } from '../components/Skeletons';
 import { useToast } from '../components/Toast';
 import { exportTableToExcel } from '../services/excel/excelExportService';
 import { loadAllDepartments, addDepartment, subscribeDepartments } from '../lib/departmentsService';
+import { MinisterialEvolutionView } from '../components/MinisterialEvolutionView';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 
 interface MemberManagementProps {
   members: Member[];
@@ -169,8 +171,30 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       const fetchedPhoto = camelDetails.photoUrl !== undefined ? camelDetails.photoUrl : (member.photoUrl || '');
       originalPhotoRef.current = fetchedPhoto || '';
 
+      // Garante sincronização de papéis de liderança se só houver leaderDepartment legado
+      let initialRoles = member.departmentRoles || {};
+      const hasLeadershipInRoles = Object.values(initialRoles).some(
+        r => r && r !== 'Integrante' && r !== 'Membro'
+      );
+      if (!hasLeadershipInRoles && member.leaderDepartment) {
+        const parsedRoles: Record<string, string> = { ...initialRoles };
+        const segments = member.leaderDepartment.split(',').map(s => s.trim()).filter(Boolean);
+        segments.forEach(seg => {
+          if (seg.includes('—') || seg.includes('-')) {
+            const parts = seg.split(/[—\-]/);
+            const role = parts[0]?.trim() || 'Líder';
+            const dept = parts.slice(1).join(' - ').trim();
+            if (dept) parsedRoles[dept] = role;
+          } else {
+            parsedRoles[seg] = 'Líder';
+          }
+        });
+        initialRoles = parsedRoles;
+      }
+
       setSelectedMember({
         ...member,
+        departmentRoles: initialRoles,
         photoUrl: fetchedPhoto,
         ministerialHistory: Array.isArray(camelDetails.ministerialHistory) 
           ? camelDetails.ministerialHistory 
@@ -200,58 +224,93 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     setIsSaving(true);
 
     try {
-      const snakePayload = toSnake(selectedMember);
+      // Calcula leader_department a partir de departmentRoles para compatibilidade retroativa
+      const leaderDeptValue = selectedMember.departmentRoles
+        ? Object.entries(selectedMember.departmentRoles)
+            .filter(([_, role]) => role !== 'Integrante' && role !== 'Membro')
+            .map(([d, r]) => `${r} - ${d}`)
+            .join(', ')
+        : (selectedMember.leaderDepartment || '');
 
-      // OTIMIZAÇÃO FASE 1: Se a foto não foi alterada pelo usuário, remove photo_url do payload
-      // para não reenviar dezenas/centenas de KB em Base64 desnecessariamente.
+      const nowIso = new Date().toISOString();
+
+      // Payload explícito — apenas colunas que existem na tabela profiles
+      const payload: Record<string, any> = {
+        first_name: selectedMember.firstName || '',
+        last_name: selectedMember.lastName || '',
+        cpf: selectedMember.cpf || null,
+        rg: selectedMember.rg || null,
+        birth_date: selectedMember.birthDate || null,
+        naturalness: selectedMember.naturalness || null,
+        nationality: selectedMember.nationality || null,
+        marital_status: selectedMember.maritalStatus || null,
+        marriage_date: selectedMember.marriageDate || null,
+        spouse_name: selectedMember.spouseName || null,
+        has_children: selectedMember.hasChildren ?? false,
+        children: selectedMember.children || [],
+        cep: selectedMember.cep || null,
+        address: selectedMember.address || null,
+        number: selectedMember.number || null,
+        complement: selectedMember.complement || null,
+        neighborhood: selectedMember.neighborhood || null,
+        city: selectedMember.city || null,
+        state: selectedMember.state || null,
+        cell: selectedMember.cell || null,
+        phones: selectedMember.phones || [],
+        email: selectedMember.email || null,
+        education: selectedMember.education || null,
+        profession: selectedMember.profession || null,
+        is_baptized: selectedMember.isBaptized ?? false,
+        baptism_church: selectedMember.baptismChurch || null,
+        baptism_date: selectedMember.baptismDate || null,
+        is_holy_spirit_baptized: selectedMember.isHolySpiritBaptized ?? false,
+        previous_church: selectedMember.previousChurch || null,
+        participates_in_convention: selectedMember.participatesInConvention ?? false,
+        convention_name: selectedMember.conventionName || null,
+        entry_date: selectedMember.entryDate || null,
+        received_as: selectedMember.receivedAs || null,
+        current_position: selectedMember.currentPosition || null,
+        departments: selectedMember.departments || [],
+        department_roles: selectedMember.departmentRoles || {},
+        leader_department: leaderDeptValue,
+        consecrated_to: selectedMember.consecratedTo || null,
+        consecration_date: selectedMember.consecrationDate || null,
+        ministerial_history: selectedMember.ministerialHistory || [],
+        status: selectedMember.status || 'ACTIVE',
+        role: selectedMember.role || 'MEMBER',
+        valid_until: selectedMember.validUntil || null,
+        last_updated: nowIso,
+      };
+
+      // Foto: só inclui se foi alterada (evita reenvio desnecessário de Base64)
       const initialPhoto = (originalPhotoRef.current || '').trim();
       const currentPhoto = (selectedMember.photoUrl || '').trim();
-      const isPhotoModified = currentPhoto !== initialPhoto;
-
-      if (!isPhotoModified) {
-        delete snakePayload.photo_url;
-      } else {
-        // Foto foi alterada: envia a nova foto em Base64 ou null se foi removida
-        snakePayload.photo_url = currentPhoto || null;
+      if (currentPhoto !== initialPhoto) {
+        payload.photo_url = currentPhoto || null;
       }
 
-      // Sanitizar campos do tipo DATE: converter string vazia ("") para null
-      const dateFields = [
-        'birth_date',
-        'marriage_date',
-        'baptism_date',
-        'entry_date',
-        'position_start_date',
-        'consecration_date',
-        'department_start_date'
-      ];
+      // Sanitiza campos DATE: string vazia → null
+      const dateFields = ['birth_date', 'marriage_date', 'baptism_date', 'entry_date',
+        'position_start_date', 'consecration_date', 'department_start_date'];
       for (const df of dateFields) {
-        if (snakePayload[df] === '') {
-          snakePayload[df] = null;
-        }
+        if (payload[df] === '') payload[df] = null;
       }
 
-      let { error } = await supabase
+      const { error } = await supabase
         .from('profiles')
-        .update(snakePayload)
+        .update(payload)
         .eq('id', selectedMember.id);
-
-      // Fallback caso a coluna department_start_date ainda não exista no banco
-      if (error && (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('department_start_date'))) {
-        console.warn('[MEMBROS] Coluna department_start_date não encontrada no banco. Salvando sem ela...');
-        delete snakePayload.department_start_date;
-        const retryRes = await supabase
-          .from('profiles')
-          .update(snakePayload)
-          .eq('id', selectedMember.id);
-        error = retryRes.error;
-      }
 
       if (error) {
         console.error('Erro ao salvar alterações do membro:', error);
         showToast('Não foi possível salvar as alterações. Tente novamente.', 'error');
       } else {
-        onUpdateMembers(members.map(m => m.id === selectedMember.id ? selectedMember : m));
+        const savedMember = {
+          ...selectedMember,
+          leaderDepartment: leaderDeptValue,
+          lastUpdated: nowIso,
+        };
+        onUpdateMembers(members.map(m => m.id === selectedMember.id ? savedMember : m));
         setIsEditModalOpen(false);
         showToast('Cadastro atualizado com sucesso!', 'success');
       }
@@ -626,7 +685,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     <option value="Solteiro">Solteiro(a)</option>
                     <option value="Casado">Casado(a)</option>
                     <option value="Viúvo">Viúvo(a)</option>
-                    <option value="Separado">Separado(a)</option>
+                    <option value="Separado(a)/Divorciado(a)">Separado(a)/Divorciado(a)</option>
+                    {selectedMember.maritalStatus === 'Separado' && (
+                      <option value="Separado">Separado(a)/Divorciado(a)</option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -1052,101 +1114,16 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
               {/* Summary for Member */}
               {!(isAdmin || isSecretary) && (
-                <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Cargo Atual</p>
-                      <p className="text-sm font-bold text-primary">{selectedMember.currentPosition || 'Membro'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Tempo no Cargo</p>
-                      <p className="text-sm font-bold text-primary">
-                        {(() => {
-                          if (!selectedMember.positionStartDate) return 'N/A';
-                          const start = new Date(selectedMember.positionStartDate);
-                          const now = new Date();
-                          const diffTime = Math.abs(now.getTime() - start.getTime());
-                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          const years = Math.floor(diffDays / 365);
-                          const months = Math.floor((diffDays % 365) / 30);
-                          return `${years} anos e ${months} meses`;
-                        })()}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Consagrado a</p>
-                      <p className="text-sm font-bold text-primary">{selectedMember.consecratedTo || 'Não informado'}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-primary/10">
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Departamento(s)</p>
-                      <p className="text-sm font-bold text-primary">
-                        {selectedMember.departments && selectedMember.departments.length > 0
-                          ? selectedMember.departments.join(', ')
-                          : 'Nenhum Departamento'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Data de Entrada no Depto.</p>
-                      <p className="text-sm font-bold text-primary">
-                        {selectedMember.departmentStartDate
-                          ? selectedMember.departmentStartDate.split('-').reverse().join('/')
-                          : 'Não informada'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-muted uppercase font-bold">Tempo no Departamento</p>
-                      <p className="text-sm font-bold text-primary">
-                        {(() => {
-                          if (!selectedMember.departmentStartDate) return 'N/A';
-                          const start = new Date(selectedMember.departmentStartDate);
-                          const now = new Date();
-                          const diffMs = now.getTime() - start.getTime();
-                          const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                          const years = Math.floor(totalDays / 365);
-                          const months = Math.floor((totalDays % 365) / 30);
-                          const days = totalDays % 30;
-                          return `${years > 0 ? `${years} ano(s) ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`.trim() || 'Recente';
-                        })()}
-                      </p>
-                    </div>
-                  </div>
-
-                  {selectedMember.consecrationDate && (
-                    <div className="pt-2 border-t border-primary/10">
-                      <p className="text-[10px] text-muted uppercase font-bold">Data da Consagração</p>
-                      <p className="text-sm font-bold text-primary">
-                        {selectedMember.consecrationDate.split('-').reverse().join('/')}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Departamento do filho, criança ou adolescente */}
-                  {selectedMember.children?.some(c => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento') && (
-                    <div className="pt-3 border-t border-primary/10 space-y-2">
-                      <p className="text-[10px] text-muted uppercase font-bold flex items-center gap-1.5">
-                        <span>👶 Departamento do Filho / Criança / Adolescente</span>
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {selectedMember.children
-                          .filter(c => c.departments?.length > 0 && c.departments[0] !== 'Nenhum Departamento')
-                          .map((c, cIdx) => (
-                            <div key={cIdx} className="p-2.5 bg-primary/5 rounded-lg border border-primary/10 flex items-center justify-between">
-                              <div>
-                                <p className="text-xs font-bold text-primary">{c.name || `Filho(a) #${cIdx + 1}`}</p>
-                                <p className="text-[10px] text-muted">Histórico infantil / adolescente</p>
-                              </div>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-secondary/15 text-secondary">
-                                {c.departments[0]}
-                              </span>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <MinisterialEvolutionView
+                  departments={selectedMember.departments || []}
+                  departmentRoles={selectedMember.departmentRoles || {}}
+                  leaderDepartment={selectedMember.leaderDepartment || ''}
+                  consecratedTo={selectedMember.consecratedTo || ''}
+                  consecrationDate={selectedMember.consecrationDate || ''}
+                  children={selectedMember.children || []}
+                  ministerialHistory={selectedMember.ministerialHistory || []}
+                  showNotice={false}
+                />
               )}
 
               {/* Admin Edit Form */}
@@ -1155,6 +1132,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-bold text-muted uppercase">Recebido como</label>
+                      <p className="text-[10px] text-muted/70 italic -mt-0.5">Como o usuário entrou na igreja e qual a condição atual</p>
                       <div className="flex gap-4">
                         <label className="flex items-center gap-1 text-xs">
                           <input
@@ -1173,7 +1151,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Cargo Atual</label>
+                      <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Condição Atual</label>
                       <select
                         value={selectedMember.currentPosition}
                         onChange={(e) => setSelectedMember({ ...selectedMember, currentPosition: e.target.value })}
@@ -1182,128 +1160,27 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Data de Início no Cargo</label>
-                      <input
-                        type="date"
-                        value={selectedMember.positionStartDate}
-                        onChange={(e) => setSelectedMember({ ...selectedMember, positionStartDate: e.target.value })}
-                        className="w-full p-2 rounded border border-muted/20 text-sm"
-                      />
-                    </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-bold text-muted uppercase">Departamento Atual</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {[
-                        ...DEPARTMENTS,
-                        ...(selectedMember.departments || []).filter(d => !DEPARTMENTS.includes(d) && d !== '')
-                      ].map(dept => (
-                        <label key={dept} className="flex items-center gap-2 text-[10px] p-2 bg-muted/5 rounded">
-                          <input
-                            type="checkbox"
-                            checked={selectedMember.departments.includes(dept)}
-                            onChange={(e) => {
-                              const current = selectedMember.departments;
-                              const next = e.target.checked ? [...current, dept] : current.filter(d => d !== dept);
-                              setSelectedMember({ ...selectedMember, departments: next });
-                            }}
-                            className="w-3 h-3 rounded text-secondary focus:ring-secondary"
-                          />
-                          {dept}
-                        </label>
-                      ))}
-                    </div>
-                    {/* Campo para adicionar departamento personalizado */}
-                    <div className="flex gap-2 mt-2">
-                      <input
-                        type="text"
-                        placeholder="Adicionar outro departamento..."
-                        value={customDeptInput}
-                        onChange={(e) => setCustomDeptInput(e.target.value)}
-                        className="flex-1 p-1.5 rounded border border-muted/20 text-xs"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && customDeptInput.trim()) {
-                            e.preventDefault();
-                            const trimmed = customDeptInput.trim();
-                            if (!selectedMember.departments.includes(trimmed)) {
-                              setSelectedMember({ ...selectedMember, departments: [...selectedMember.departments, trimmed] });
-                            }
-                            setCustomDeptInput('');
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const trimmed = customDeptInput.trim();
-                          if (trimmed && !selectedMember.departments.includes(trimmed)) {
-                            setSelectedMember({ ...selectedMember, departments: [...selectedMember.departments, trimmed] });
-                          }
-                          setCustomDeptInput('');
-                        }}
-                        className="px-3 py-1 bg-secondary text-white text-[10px] font-bold rounded hover:bg-secondary/90 whitespace-nowrap"
-                      >
-                        + Adicionar
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Data de Entrada no Departamento */}
-                  <div className="pt-3 border-t border-muted/5">
-                    <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Data de Entrada no Departamento</label>
-                    <input
-                      type="date"
-                      value={selectedMember.departmentStartDate || ''}
-                      onChange={(e) => setSelectedMember({ ...selectedMember, departmentStartDate: e.target.value })}
-                      className="w-full sm:w-1/2 p-2 rounded border border-muted/20 text-sm"
-                    />
-                    {selectedMember.departmentStartDate && (
-                      <p className="text-[10px] text-muted mt-1">
-                        {(() => {
-                          const start = new Date(selectedMember.departmentStartDate!);
-                          const now = new Date();
-                          const diffMs = now.getTime() - start.getTime();
-                          const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                          const years = Math.floor(totalDays / 365);
-                          const months = Math.floor((totalDays % 365) / 30);
-                          const days = totalDays % 30;
-                          return `Tempo no departamento: ${years > 0 ? `${years} ano(s) e ` : ''}${months} mês(es)${days > 0 ? ` e ${days} dia(s)` : ''}`;
-                        })()}
-                      </p>
-                    )}
-                  </div>
+                  <DepartmentSelect
+                    selectedDepartments={selectedMember.departments || []}
+                    departmentRoles={selectedMember.departmentRoles || {}}
+                    onChange={(nextDepts, nextRoles) => {
+                      const leaders = Object.entries(nextRoles)
+                        .filter(([_, role]) => role !== 'Integrante')
+                        .map(([d, r]) => `${r} - ${d}`);
+                      setSelectedMember({
+                        ...selectedMember,
+                        departments: nextDepts,
+                        departmentRoles: nextRoles,
+                        leaderDepartment: leaders.join(', '),
+                      });
+                    }}
+                  />
                 </div>
               )}
 
-              {/* Consagração (Admin Only) */}
-              {(isAdmin || isSecretary) && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-muted/5">
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Consagrado a:</label>
-                    <select
-                      value={selectedMember.consecratedTo || ''}
-                      onChange={(e) => setSelectedMember({ ...selectedMember, consecratedTo: e.target.value })}
-                      className="w-full p-2 rounded border border-muted/20 text-sm bg-white h-10"
-                    >
-                      <option value="">Selecione...</option>
-                      {CONSECRATIONS.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted mb-1 uppercase">Data da Consagração</label>
-                    <input
-                      type="date"
-                      value={selectedMember.consecrationDate || ''}
-                      onChange={(e) => setSelectedMember({ ...selectedMember, consecrationDate: e.target.value })}
-                      className="w-full p-2 rounded border border-muted/20 text-sm"
-                    />
-                  </div>
-                </div>
-              )}
+
 
               {/* Histórico Timeline */}
               <div className="space-y-4 pt-4 border-t border-muted/5">

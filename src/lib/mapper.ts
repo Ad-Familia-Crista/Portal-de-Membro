@@ -29,6 +29,7 @@ const FIELD_MAPPING: Record<string, string> = {
   positionStartDate: 'position_start_date',
   departmentStartDate: 'department_start_date',
   leaderDepartment: 'leader_department',
+  departmentRoles: 'department_roles',
   consecratedTo: 'consecrated_to',
   consecrationDate: 'consecration_date',
   ministerialHistory: 'ministerial_history',
@@ -84,5 +85,48 @@ export const toCamel = (data: any) => {
     const uiKey = REVERSE_MAPPING[key] || key;
     camelData[uiKey] = data[key];
   });
+
+  if (typeof camelData.departmentRoles === 'string') {
+    try {
+      camelData.departmentRoles = JSON.parse(camelData.departmentRoles);
+    } catch {
+      camelData.departmentRoles = {};
+    }
+  } else if (!camelData.departmentRoles || typeof camelData.departmentRoles !== 'object') {
+    camelData.departmentRoles = {};
+  }
+
+  // Sincronização bidirecional:
+  // 1. Se departmentRoles não tiver liderança mas houver leaderDepartment legado
+  const hasLeadershipInRoles = Object.values(camelData.departmentRoles || {}).some(
+    (r: any) => r && r !== 'Integrante' && r !== 'Membro'
+  );
+
+  if (!hasLeadershipInRoles && camelData.leaderDepartment && typeof camelData.leaderDepartment === 'string' && camelData.leaderDepartment.trim()) {
+    const roles: Record<string, string> = { ...camelData.departmentRoles };
+    const segments = camelData.leaderDepartment.split(',').map((s: string) => s.trim()).filter(Boolean);
+    segments.forEach((seg: string) => {
+      if (seg.includes('—') || seg.includes('-')) {
+        const parts = seg.split(/[—\-]/);
+        const role = parts[0]?.trim() || 'Líder';
+        const dept = parts.slice(1).join(' - ').trim();
+        if (dept) roles[dept] = role;
+      } else {
+        roles[seg] = 'Líder';
+      }
+    });
+    camelData.departmentRoles = roles;
+  }
+
+  // 2. Se leaderDepartment estiver vazio mas departmentRoles contiver liderança
+  if ((!camelData.leaderDepartment || !camelData.leaderDepartment.trim()) && camelData.departmentRoles) {
+    const leaders = Object.entries(camelData.departmentRoles)
+      .filter(([_, r]) => r && r !== 'Integrante' && r !== 'Membro')
+      .map(([d, r]) => `${r} - ${d}`);
+    if (leaders.length > 0) {
+      camelData.leaderDepartment = leaders.join(', ');
+    }
+  }
+
   return camelData;
 };
