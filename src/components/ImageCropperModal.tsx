@@ -115,8 +115,17 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       renderedHeight * scaleFactor
     );
 
-    const croppedBase64 = canvas.toDataURL('image/jpeg', 0.82);
-    onCropComplete(croppedBase64);
+    let croppedData = '';
+    try {
+      croppedData = canvas.toDataURL('image/webp', 0.82);
+      if (!croppedData.startsWith('data:image/webp')) {
+        croppedData = canvas.toDataURL('image/jpeg', 0.82);
+      }
+    } catch {
+      croppedData = canvas.toDataURL('image/jpeg', 0.82);
+    }
+
+    onCropComplete(croppedData);
     onClose();
   };
 

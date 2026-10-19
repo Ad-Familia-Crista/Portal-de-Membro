@@ -24,6 +24,7 @@ import { Modal } from '../components/Modal';
 import { supabase } from '../lib/supabase';
 import { toCamel } from '../lib/mapper';
 import { optimizeImage } from '../lib/imageOptimizer';
+import { uploadMemberPhoto, deleteMemberPhoto } from '../services/storageService';
 import { MemberTableSkeleton } from '../components/Skeletons';
 import { useToast } from '../components/Toast';
 import { exportTableToExcel } from '../services/excel/excelExportService';
@@ -285,8 +286,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       // Foto: só inclui se foi alterada (evita reenvio desnecessário de Base64)
       const initialPhoto = (originalPhotoRef.current || '').trim();
       const currentPhoto = (selectedMember.photoUrl || '').trim();
+      let oldPhotoToDelete: string | null = null;
+      let tUpload = 0;
+
       if (currentPhoto !== initialPhoto) {
-        payload.photo_url = currentPhoto || null;
+        if (currentPhoto && (currentPhoto.startsWith('data:') || currentPhoto.startsWith('blob:'))) {
+          const tUploadStart = performance.now();
+          const uploadRes = await uploadMemberPhoto(selectedMember.id, currentPhoto, initialPhoto);
+          tUpload = performance.now() - tUploadStart;
+          payload.photo_url = uploadRes.url || null;
+          oldPhotoToDelete = uploadRes.oldPhotoToDelete || null;
+          console.info(`[PERF_GESTAO] Upload/Processamento da foto: ${tUpload.toFixed(1)} ms (${uploadRes.storageType})`);
+        } else if (!currentPhoto && initialPhoto) {
+          oldPhotoToDelete = initialPhoto;
+          payload.photo_url = null;
+        } else {
+          payload.photo_url = currentPhoto || null;
+        }
       }
 
       // Sanitiza campos DATE: string vazia → null
@@ -296,15 +312,24 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         if (payload[df] === '') payload[df] = null;
       }
 
+      const tDbStart = performance.now();
       const { error } = await supabase
         .from('profiles')
         .update(payload)
         .eq('id', selectedMember.id);
+      const tDatabase = performance.now() - tDbStart;
 
       if (error) {
         console.error('Erro ao salvar alterações do membro:', error);
         showToast('Não foi possível salvar as alterações. Tente novamente.', 'error');
       } else {
+        // Exclui a foto antiga SOMENTE APÓS a confirmação do update no banco
+        if (oldPhotoToDelete) {
+          deleteMemberPhoto(oldPhotoToDelete).catch((delErr) => {
+            console.warn('[STORAGE] Aviso ao remover foto antiga na gestão:', delErr);
+          });
+        }
+
         const savedMember = {
           ...selectedMember,
           leaderDepartment: leaderDeptValue,
@@ -313,6 +338,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         onUpdateMembers(members.map(m => m.id === selectedMember.id ? savedMember : m));
         setIsEditModalOpen(false);
         showToast('Cadastro atualizado com sucesso!', 'success');
+        console.info(`[PERF_GESTAO] Salvo com sucesso! Banco: ${tDatabase.toFixed(1)} ms | Foto: ${tUpload.toFixed(1)} ms`);
       }
     } catch (err: any) {
       console.error('Exceção ao salvar membro:', err);
@@ -597,7 +623,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       const file = e.target.files?.[0];
                       if (!file) return;
                       try {
-                        const compressed = await optimizeImage(file, { maxWidth: 400, maxHeight: 400, quality: 0.82 });
+                        const compressed = await optimizeImage(file, { maxWidth: 400, maxHeight: 400, quality: 0.82, format: 'auto' });
                         setSelectedMember({
                           ...selectedMember,
                           photoUrl: compressed

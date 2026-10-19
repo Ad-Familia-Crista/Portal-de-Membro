@@ -501,56 +501,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // 3) Verificar se o registro já existe na tabela profiles
-    const { data: existingProfile, error: checkError } = await supabase
-      .from('profiles')
-      .select('id, role, status')
-      .eq('id', currentUserId)
-      .maybeSingle();
-
-    if (checkError) {
-      console.warn('[CADASTRO] Aviso ao verificar existência prévia de perfil:', checkError);
-      const msg = (checkError.message || '').toLowerCase();
-      if (checkError.code === 'PGRST301' || msg.includes('jwt') || msg.includes('token') || msg.includes('expired')) {
-        const authErr: any = new Error('Sessão expirada no banco');
-        authErr.isAuthError = true;
-        authErr.status = 401;
-        authErr.originalError = checkError;
-        throw authErr;
-      }
-    }
-
-    let resultRow: { id: string } | null = null;
+    // 3) Persistência otimizada: tenta UPDATE direto em 1 roundtrip seguro com confirmação de linha modificada.
+    // Evita SELECT prévio redundante em cadastros existentes, reduzindo a latência pela metade.
+    let resultRow: { id: string; role?: string; status?: string } | null = null;
     let persistenceError: any = null;
 
-    if (existingProfile) {
-      // CENÁRIO A: Perfil existente -> executa UPDATE seguro com confirmação de linha modificada
-      // role e status nunca são modificados durante a atualização cadastral
-      let updateRes = await supabase
+    let updateRes = await supabase
+      .from('profiles')
+      .update(snakeData)
+      .eq('id', currentUserId)
+      .select('id, role, status');
+
+    // Fallback gracioso: coluna department_start_date ou department_roles ausente no banco
+    if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703' || updateRes.error.message?.includes('department_start_date') || updateRes.error.message?.includes('department_roles'))) {
+      console.warn('[CADASTRO] Coluna ausente no banco (department_start_date ou department_roles). Salvando update com fallback...');
+      delete snakeData.department_start_date;
+      delete snakeData.department_roles;
+      updateRes = await supabase
         .from('profiles')
         .update(snakeData)
         .eq('id', currentUserId)
-        .select('id');
+        .select('id, role, status');
+    }
 
-      // Fallback gracioso: coluna department_start_date ou department_roles ausente no banco
-      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.code === '42703' || updateRes.error.message?.includes('department_start_date') || updateRes.error.message?.includes('department_roles'))) {
-        console.warn('[CADASTRO] Coluna ausente no banco (department_start_date ou department_roles). Salvando update com fallback...');
-        delete snakeData.department_start_date;
-        delete snakeData.department_roles;
-        updateRes = await supabase
-          .from('profiles')
-          .update(snakeData)
-          .eq('id', currentUserId)
-          .select('id');
-      }
-
+    const dataArr = updateRes.data as { id: string; role?: string; status?: string }[] | null;
+    if (dataArr && dataArr.length > 0) {
+      resultRow = dataArr[0];
       persistenceError = updateRes.error;
-      const dataArr = updateRes.data as { id: string }[] | null;
-      resultRow = dataArr && dataArr.length > 0 ? dataArr[0] : null;
-    } else {
-      // CENÁRIO B: Usuário autenticado sem perfil -> cria o registro via UPSERT seguro
-      // role: 'MEMBER' e status: 'ACTIVE' são definidos como valores fixos controlados pelo sistema,
-      // posicionados APÓS ...snakeData para impossibilitar sobrescrita.
+    } else if (!updateRes.error) {
+      // CENÁRIO B: Usuário autenticado sem linha prévia na tabela profiles -> cria via UPSERT seguro
       console.log('[CADASTRO] Perfil ausente na tabela profiles. Criando novo registro para usuário autenticado...');
       const insertPayload: any = {
         ...snakeData,
@@ -564,9 +543,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let upsertRes = await supabase
         .from('profiles')
         .upsert(insertPayload, { onConflict: 'id' })
-        .select('id');
+        .select('id, role, status');
 
-      // Fallback gracioso: coluna department_start_date ou department_roles ausente no banco
       if (upsertRes.error && (upsertRes.error.code === 'PGRST204' || upsertRes.error.code === '42703' || upsertRes.error.message?.includes('department_start_date') || upsertRes.error.message?.includes('department_roles'))) {
         console.warn('[CADASTRO] Coluna ausente no banco (department_start_date ou department_roles). Salvando upsert com fallback...');
         delete insertPayload.department_start_date;
@@ -574,12 +552,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         upsertRes = await supabase
           .from('profiles')
           .upsert(insertPayload, { onConflict: 'id' })
-          .select('id');
+          .select('id, role, status');
       }
 
       persistenceError = upsertRes.error;
-      const dataArr = upsertRes.data as { id: string }[] | null;
-      resultRow = dataArr && dataArr.length > 0 ? dataArr[0] : null;
+      const upsertArr = upsertRes.data as { id: string; role?: string; status?: string }[] | null;
+      resultRow = upsertArr && upsertArr.length > 0 ? upsertArr[0] : null;
+    } else {
+      persistenceError = updateRes.error;
     }
 
     if (persistenceError) {
@@ -620,8 +600,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } : {}),
       id: currentUserId,
       email: currentUserEmail,
-      role: existingProfile?.role || user?.role || 'MEMBER',
-      status: existingProfile?.status || user?.status || 'ACTIVE',
+      role: (resultRow?.role as any) || user?.role || 'MEMBER',
+      status: (resultRow?.status as any) || user?.status || 'ACTIVE',
       validUntil: updatedUser.validUntil,
       lastUpdated: updatedUser.lastUpdated
     };

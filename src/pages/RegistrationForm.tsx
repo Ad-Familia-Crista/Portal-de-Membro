@@ -16,6 +16,8 @@ import { supabase } from '../lib/supabase';
 import { ImageCropperModal } from '../components/ImageCropperModal';
 import { MinisterialEvolutionView } from '../components/MinisterialEvolutionView';
 import { DepartmentSelect } from '../components/DepartmentSelect';
+import { preResizeForCropper } from '../lib/imageOptimizer';
+import { uploadMemberPhoto, deleteMemberPhoto } from '../services/storageService';
 
 const schema = z.object({
   firstName: z.string().min(1, 'Nome completo é obrigatório'),
@@ -266,6 +268,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const [cepError, setCepError] = React.useState('');
   const [cepLocked, setCepLocked] = React.useState(false); // true = campos CEP protegidos
   const [isSubmittingForm, setIsSubmittingForm] = React.useState(false);
+  const [saveStage, setSaveStage] = React.useState<'idle' | 'preparing' | 'uploading' | 'saving' | 'finalizing'>('idle');
   const [isValidatingStep, setIsValidatingStep] = React.useState(false);
   const [childCpfDbErrors, setChildCpfDbErrors] = React.useState<Record<number, string>>({});
   const [childCpfValidating, setChildCpfValidating] = React.useState<Record<number, boolean>>({});
@@ -356,6 +359,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     if (isSubmittingRef.current) return;
     if (user && !hasInitializedRef.current) {
       hasInitializedRef.current = true;
+      originalPhotoRef.current = user.photoUrl || '';
       reset({
         ...user,
         firstName: user.firstName || '',
@@ -408,6 +412,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         photoUrl: user.photoUrl || '',
       });
     } else if (user && hasInitializedRef.current) {
+      if (!originalPhotoRef.current && user.photoUrl) {
+        originalPhotoRef.current = user.photoUrl;
+      }
       // Sincroniza campos ministeriais e dados frescos quando o perfil for recarregado do banco
       setValue('departments', user.departments || []);
       setValue('departmentRoles', user.departmentRoles || {});
@@ -856,10 +863,16 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     setIsSubmittingForm(true);
 
     const tStart = performance.now();
-    console.log('[CADASTRO] Início do processo de salvamento');
+    let tPrepared = 0;
+    let tUpload = 0;
+    let tDatabase = 0;
+    console.info('[CADASTRO] Início do processo de salvamento');
 
     try {
-      // 2. Formatação dos dados para o schema da tabela profiles
+      // ETAPA 1: Preparação e validação estrutural dos dados
+      setSaveStage('preparing');
+      const tPrepareStart = performance.now();
+
       const formattedData = {
         ...data,
         hasChildren: data.hasChildren === 'Sim',
@@ -870,54 +883,79 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         phones: data.phones?.map((p: any) => p.number).filter(Boolean) || [],
       };
 
-      const tPrepared = performance.now();
-      console.log(`[CADASTRO] Payload preparado em ${(tPrepared - tStart).toFixed(1)} ms`);
+      tPrepared = performance.now() - tPrepareStart;
+      console.info(`[PERF_CADASTRO] 1. Preparação dos dados: ${tPrepared.toFixed(1)} ms`);
 
-      // 3. Medição de tamanho do payload (estimativa segura sem expor dados)
+      // 3. Medição de tamanho do payload (diagnóstico)
       try {
         const jsonStr = JSON.stringify(formattedData);
         const totalKb = (new Blob([jsonStr]).size / 1024).toFixed(1);
         const photoKb = formattedData.photoUrl 
           ? (new Blob([formattedData.photoUrl]).size / 1024).toFixed(1) 
           : '0';
-        console.log(`[CADASTRO] Tamanho aproximado do payload: ${totalKb} KB`);
-        console.log(`[CADASTRO] photo_url: ${photoKb !== '0' ? `${photoKb} KB` : 'Sem foto anexada'}`);
-      } catch (err) {
-        console.warn('[CADASTRO] Não foi possível calcular o tamanho do payload:', err);
-      }
+        console.info(`[CADASTRO] Tamanho do payload: ${totalKb} KB | Foto: ${photoKb !== '0' ? `${photoKb} KB` : 'nenhuma'}`);
+      } catch {}
 
-      // 4. Controle da foto: não enviar photo_url se não foi alterada.
-      // Cenario A/C: foto igual ao original ou ambas vazias → omite do payload.
-      // Cenario B: nova foto selecionada → envia o novo Base64.
-      // Cenario D: remocao explicitamente pelo usuario (valor vazio, original tinha Base64) → envia '' para limpar.
+      // ETAPA 2: Controle e processamento da foto
       const payloadData = { ...formattedData };
-      if (payloadData.photoUrl === originalPhotoRef.current) {
+      const currentPhoto = (payloadData.photoUrl || '').trim();
+      const originalPhoto = (originalPhotoRef.current || '').trim();
+      let oldPhotoToDelete: string | null = null;
+
+      if (currentPhoto === originalPhoto) {
+        // Foto inalterada: remove do payload para economizar tráfego de rede e CPU do banco
         delete payloadData.photoUrl;
-        console.log('[CADASTRO] photo_url omitida do payload (sem alteracao).');
-      } else {
-        const photoKbSent = payloadData.photoUrl
-          ? (new Blob([payloadData.photoUrl]).size / 1024).toFixed(1)
-          : '0';
-        console.log(`[CADASTRO] photo_url incluida no payload: ${photoKbSent !== '0' ? `${photoKbSent} KB` : 'removida (vazia)'}`);
+        console.info('[CADASTRO] Foto inalterada — omitida do envio para economizar tráfego de rede.');
+      } else if (currentPhoto && (currentPhoto.startsWith('data:') || currentPhoto.startsWith('blob:'))) {
+        // Nova foto anexada: realiza upload para Supabase Storage se disponível
+        setSaveStage('uploading');
+        console.info('[CADASTRO] Iniciando upload/otimização da nova foto...');
+        const tUploadStart = performance.now();
+        const uploadRes = await uploadMemberPhoto(
+          user?.id || '',
+          currentPhoto,
+          originalPhoto
+        );
+        tUpload = performance.now() - tUploadStart;
+        payloadData.photoUrl = uploadRes.url || null;
+        oldPhotoToDelete = uploadRes.oldPhotoToDelete || null;
+        console.info(`[PERF_CADASTRO] 2. Upload/Processamento da foto: ${tUpload.toFixed(1)} ms (${uploadRes.storageType})`);
+        if (uploadRes.warning) {
+          console.info(`[STORAGE] Aviso: ${uploadRes.warning}`);
+        }
+      } else if (!currentPhoto && originalPhoto) {
+        // Usuário removeu a foto
+        oldPhotoToDelete = originalPhoto;
+        payloadData.photoUrl = null;
+        console.info('[CADASTRO] Foto removida pelo usuário.');
       }
 
-      // 5. Execução da persistência no Supabase com confirmação de gravação
-      console.log('[CADASTRO] Antes de persistir no Supabase');
-      const tSupabaseStart = performance.now();
+      // ETAPA 3: Persistência no banco de dados (Supabase)
+      setSaveStage('saving');
+      console.info('[CADASTRO] Gravando dados no banco...');
+      const tDbStart = performance.now();
       const savedUser = await updateUser(payloadData);
-      const tSupabaseEnd = performance.now();
-      console.log(`[CADASTRO] Supabase respondeu com sucesso: ${(tSupabaseEnd - tSupabaseStart).toFixed(1)} ms`);
+      tDatabase = performance.now() - tDbStart;
+      console.info(`[PERF_CADASTRO] 3. Persistência no banco (updateUser): ${tDatabase.toFixed(1)} ms`);
 
       if (!savedUser || !savedUser.id) {
-        throw new Error('A gravação do cadastro não foi confirmada pelo banco de dados.');
+        throw new Error('A gravação do cadastro não foi confirmada pelo servidor.');
       }
 
-      // 6. Se a foto foi enviada com sucesso, atualiza a referência original
+      // ETAPA 4: Finalização e limpeza de recursos
+      // REGRA CRÍTICA: Exclui a foto antiga do Storage SOMENTE APÓS a confirmação do banco
+      setSaveStage('finalizing');
+      if (oldPhotoToDelete) {
+        deleteMemberPhoto(oldPhotoToDelete).catch((delErr) => {
+          console.warn('[STORAGE] Aviso ao remover foto antiga:', delErr);
+        });
+      }
+
+      // Atualiza a referência da foto original para evitar reenvio futuro
       if (payloadData.photoUrl !== undefined) {
-        originalPhotoRef.current = payloadData.photoUrl;
+        originalPhotoRef.current = payloadData.photoUrl || '';
       }
 
-      // 7. Confirmação real do banco obtida com sucesso:
       showToast('Cadastro salvo com sucesso no banco de dados!', 'success');
       try {
         const userIdToRemove = savedUser.id || user?.id;
@@ -927,8 +965,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         localStorage.removeItem('portal_registration_step');
       } catch {}
 
-      const tTotal = performance.now();
-      console.log(`[CADASTRO] Finalização - Tempo total do salvamento: ${(tTotal - tStart).toFixed(1)} ms`);
+      const tTotal = performance.now() - tStart;
+      console.info(
+        `[PERF_CADASTRO] ✅ SALVAMENTO CONCLUÍDO COM SUCESSO: ${tTotal.toFixed(1)} ms ` +
+        `[Preparo: ${tPrepared.toFixed(1)} ms | Foto/Upload: ${tUpload.toFixed(1)} ms | Banco: ${tDatabase.toFixed(1)} ms]`
+      );
 
       if (onComplete) {
         onComplete();
@@ -982,6 +1023,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     } finally {
       isSubmittingRef.current = false;
       setIsSubmittingForm(false);
+      setSaveStage('idle');
     }
   };
 
@@ -2042,8 +2084,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                   control={control}
                   render={({ field }) => {
                     const fileInputRef = React.useRef<HTMLInputElement>(null);
+                    const [isPreparingPhoto, setIsPreparingPhoto] = React.useState(false);
                     
-                    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+                    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
                       
@@ -2051,18 +2094,29 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         showToast('A imagem selecionada deve ter no máximo 10MB.', 'error');
                         return;
                       }
-                      
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
-                        setTempImageSrc(reader.result as string);
+
+                      setIsPreparingPhoto(true);
+                      try {
+                        const t0 = performance.now();
+                        // Pre-redimensiona de forma ultraleve para evitar travar a memória/GPU com imagens pesadas
+                        const workingImage = await preResizeForCropper(file, 1200);
+                        const t1 = performance.now();
+                        console.info(`[PERF_CADASTRO] Pré-redimensionamento para enquadramento: ${(t1 - t0).toFixed(1)} ms`);
+                        setTempImageSrc(workingImage);
                         setCropperOpen(true);
-                      };
-                      reader.readAsDataURL(file);
-                      e.target.value = '';
+                      } catch (err) {
+                        console.error('Erro ao preparar imagem para enquadramento:', err);
+                        showToast('Não foi possível carregar a foto selecionada. Tente outra imagem.', 'error');
+                      } finally {
+                        setIsPreparingPhoto(false);
+                        e.target.value = '';
+                      }
                     };
 
                     const triggerFileInput = () => {
-                      fileInputRef.current?.click();
+                      if (!isPreparingPhoto) {
+                        fileInputRef.current?.click();
+                      }
                     };
 
                     const removePhoto = () => {
@@ -2172,7 +2226,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
             variant="outline" 
             className="border-black text-black hover:bg-black/10 focus:ring-black/30 w-full sm:w-auto h-11" 
             onClick={prevStep} 
-            disabled={step === 1 || isValidatingStep}
+            disabled={step === 1 || isValidatingStep || isSubmittingForm}
           >
             Anterior
           </Button>
@@ -2183,14 +2237,37 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                 <p className="text-[11px] text-muted max-w-[320px] text-center sm:text-right italic">
                   “Ao atualizar seus dados, você confirma que as informações são verdadeiras e estão de acordo com nossa Política de Privacidade.”
                 </p>
+                {isSubmittingForm && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-neutral-100 rounded-lg border border-neutral-300 text-xs font-medium text-neutral-800">
+                    <Loader2 className="w-4 h-4 animate-spin text-black shrink-0" />
+                    <span>
+                      {saveStage === 'preparing' && '1/4 - Preparando imagens e dados...'}
+                      {saveStage === 'uploading' && '2/4 - Enviando fotos para o servidor...'}
+                      {saveStage === 'saving' && '3/4 - Salvando informações no banco de dados...'}
+                      {saveStage === 'finalizing' && '4/4 - Finalizando cadastro com segurança...'}
+                      {saveStage === 'idle' && 'Salvando cadastro...'}
+                    </span>
+                  </div>
+                )}
                 <Button 
                   type="submit" 
                   variant="secondary" 
                   size="lg" 
-                  className="w-full sm:w-auto px-8 sm:px-12 h-11"
+                  className="w-full sm:w-auto px-8 sm:px-12 h-11 font-semibold"
                   disabled={isSubmittingForm}
                 >
-                  {isSubmittingForm ? 'Salvando...' : 'Salvar Cadastro'}
+                  {isSubmittingForm ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {saveStage === 'preparing' && 'Preparando imagens...'}
+                      {saveStage === 'uploading' && 'Enviando fotos...'}
+                      {saveStage === 'saving' && 'Salvando informações...'}
+                      {saveStage === 'finalizing' && 'Finalizando cadastro...'}
+                      {saveStage === 'idle' && 'Salvando...'}
+                    </span>
+                  ) : (
+                    'Salvar Cadastro'
+                  )}
                 </Button>
               </div>
             ) : (
@@ -2219,9 +2296,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         imageSrc={tempImageSrc}
         onCropComplete={(croppedData) => {
           setValue('photoUrl', croppedData, { shouldValidate: true, shouldDirty: true });
+          setTempImageSrc(null); // Libera imagem da memória imediatamente
           showToast('Foto enquadrada com sucesso!', 'success');
         }}
-        onClose={() => setCropperOpen(false)}
+        onClose={() => {
+          setCropperOpen(false);
+          setTempImageSrc(null); // Libera imagem da memória imediatamente
+        }}
       />
 
       <footer className="mt-12 pt-8 border-t border-muted/10 text-center">
