@@ -269,6 +269,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
   const [cepLocked, setCepLocked] = React.useState(false); // true = campos CEP protegidos
   const [isSubmittingForm, setIsSubmittingForm] = React.useState(false);
   const [saveStage, setSaveStage] = React.useState<'idle' | 'preparing' | 'uploading' | 'saving' | 'finalizing'>('idle');
+  const [isSlowConnection, setIsSlowConnection] = React.useState(false);
+  const slowTimerRef = React.useRef<any>(null);
   const [isValidatingStep, setIsValidatingStep] = React.useState(false);
   const [childCpfDbErrors, setChildCpfDbErrors] = React.useState<Record<number, string>>({});
   const [childCpfValidating, setChildCpfValidating] = React.useState<Record<number, boolean>>({});
@@ -853,24 +855,57 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
     }
   };
 
+  // Helper defensivo de timeout para impedir que promessas fiquem pendentes indefinidamente no mobile/4G
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, ms);
+      promise
+        .then((res) => {
+          clearTimeout(timer);
+          resolve(res);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  };
+
   const onSubmit = async (data: any) => {
     // 1. Trava síncrona imediata contra cliques repetidos / duplo clique
     if (isSubmittingRef.current) {
-      console.warn('[CADASTRO] Clique duplo ou submit concorrente bloqueado com sucesso.');
+      console.warn('[DEBUG_FOTO] Clique duplo ou submit concorrente bloqueado com sucesso.');
       return;
     }
     isSubmittingRef.current = true;
     setIsSubmittingForm(true);
 
+    const startSlowTimer = () => {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      setIsSlowConnection(false);
+      slowTimerRef.current = setTimeout(() => {
+        setIsSlowConnection(true);
+      }, 8000);
+    };
+
+    const clearSlowTimer = () => {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      setIsSlowConnection(false);
+    };
+
     const tStart = performance.now();
     let tPrepared = 0;
     let tUpload = 0;
     let tDatabase = 0;
-    console.info('[CADASTRO] Início do processo de salvamento');
+    console.info('[DEBUG_FOTO] Início do processo de salvamento');
+    startSlowTimer();
 
     try {
       // ETAPA 1: Preparação e validação estrutural dos dados
       setSaveStage('preparing');
+      startSlowTimer();
       const tPrepareStart = performance.now();
 
       const formattedData = {
@@ -884,16 +919,16 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       };
 
       tPrepared = performance.now() - tPrepareStart;
-      console.info(`[PERF_CADASTRO] 1. Preparação dos dados: ${tPrepared.toFixed(1)} ms`);
+      console.info(`[DEBUG_FOTO] 1/4 Preparação dos dados: ${tPrepared.toFixed(1)} ms`);
 
-      // 3. Medição de tamanho do payload (diagnóstico)
+      // Medição de tamanho do payload (diagnóstico)
       try {
         const jsonStr = JSON.stringify(formattedData);
         const totalKb = (new Blob([jsonStr]).size / 1024).toFixed(1);
         const photoKb = formattedData.photoUrl 
           ? (new Blob([formattedData.photoUrl]).size / 1024).toFixed(1) 
           : '0';
-        console.info(`[CADASTRO] Tamanho do payload: ${totalKb} KB | Foto: ${photoKb !== '0' ? `${photoKb} KB` : 'nenhuma'}`);
+        console.info(`[DEBUG_FOTO] Tamanho do payload: ${totalKb} KB | Foto: ${photoKb !== '0' ? `${photoKb} KB` : 'nenhuma'}`);
       } catch {}
 
       // ETAPA 2: Controle e processamento da foto
@@ -905,38 +940,55 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       if (currentPhoto === originalPhoto) {
         // Foto inalterada: remove do payload para economizar tráfego de rede e CPU do banco
         delete payloadData.photoUrl;
-        console.info('[CADASTRO] Foto inalterada — omitida do envio para economizar tráfego de rede.');
+        console.info('[DEBUG_FOTO] Foto inalterada — omitida do envio para economizar tráfego de rede.');
       } else if (currentPhoto && (currentPhoto.startsWith('data:') || currentPhoto.startsWith('blob:'))) {
-        // Nova foto anexada: realiza upload para Supabase Storage se disponível
+        // Nova foto anexada: realiza upload com timeout defensivo de 15s no chamador
         setSaveStage('uploading');
-        console.info('[CADASTRO] Iniciando upload/otimização da nova foto...');
+        startSlowTimer();
+        console.info('[DEBUG_FOTO] 2/4 Iniciando envio da foto...');
         const tUploadStart = performance.now();
-        const uploadRes = await uploadMemberPhoto(
-          user?.id || '',
-          currentPhoto,
-          originalPhoto
+
+        const uploadRes = await withTimeout(
+          uploadMemberPhoto(
+            user?.id || '',
+            currentPhoto,
+            originalPhoto
+          ),
+          15000,
+          'Tempo limite excedido ao enviar a foto para o servidor (15s).'
         );
+
         tUpload = performance.now() - tUploadStart;
         payloadData.photoUrl = uploadRes.url || null;
         oldPhotoToDelete = uploadRes.oldPhotoToDelete || null;
-        console.info(`[PERF_CADASTRO] 2. Upload/Processamento da foto: ${tUpload.toFixed(1)} ms (${uploadRes.storageType})`);
+        console.info(
+          `[DEBUG_FOTO] 2/4 Concluído upload/processamento da foto em ${tUpload.toFixed(1)} ms | ` +
+          `Método: ${uploadRes.method || uploadRes.storageType} | Motivo: ${uploadRes.reason || 'ok'}`
+        );
         if (uploadRes.warning) {
-          console.info(`[STORAGE] Aviso: ${uploadRes.warning}`);
+          console.info(`[DEBUG_FOTO] Aviso do storage: ${uploadRes.warning}`);
         }
       } else if (!currentPhoto && originalPhoto) {
         // Usuário removeu a foto
         oldPhotoToDelete = originalPhoto;
         payloadData.photoUrl = null;
-        console.info('[CADASTRO] Foto removida pelo usuário.');
+        console.info('[DEBUG_FOTO] Foto removida pelo usuário.');
       }
 
-      // ETAPA 3: Persistência no banco de dados (Supabase)
+      // ETAPA 3: Persistência no banco de dados (Supabase) com timeout defensivo de 15s
       setSaveStage('saving');
-      console.info('[CADASTRO] Gravando dados no banco...');
+      startSlowTimer();
+      console.info('[DEBUG_FOTO] 3/4 Gravando dados no banco...');
       const tDbStart = performance.now();
-      const savedUser = await updateUser(payloadData);
+
+      const savedUser = await withTimeout<any>(
+        updateUser(payloadData),
+        15000,
+        'Tempo limite excedido ao gravar os dados no servidor (15s).'
+      );
+
       tDatabase = performance.now() - tDbStart;
-      console.info(`[PERF_CADASTRO] 3. Persistência no banco (updateUser): ${tDatabase.toFixed(1)} ms`);
+      console.info(`[DEBUG_FOTO] 3/4 Persistência no banco concluída em ${tDatabase.toFixed(1)} ms`);
 
       if (!savedUser || !savedUser.id) {
         throw new Error('A gravação do cadastro não foi confirmada pelo servidor.');
@@ -945,9 +997,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       // ETAPA 4: Finalização e limpeza de recursos
       // REGRA CRÍTICA: Exclui a foto antiga do Storage SOMENTE APÓS a confirmação do banco
       setSaveStage('finalizing');
+      startSlowTimer();
       if (oldPhotoToDelete) {
         deleteMemberPhoto(oldPhotoToDelete).catch((delErr) => {
-          console.warn('[STORAGE] Aviso ao remover foto antiga:', delErr);
+          console.warn('[DEBUG_FOTO] Aviso ao remover foto antiga:', delErr);
         });
       }
 
@@ -967,7 +1020,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
 
       const tTotal = performance.now() - tStart;
       console.info(
-        `[PERF_CADASTRO] ✅ SALVAMENTO CONCLUÍDO COM SUCESSO: ${tTotal.toFixed(1)} ms ` +
+        `[DEBUG_FOTO] ✅ 4/4 SALVAMENTO CONCLUÍDO COM SUCESSO: ${tTotal.toFixed(1)} ms ` +
         `[Preparo: ${tPrepared.toFixed(1)} ms | Foto/Upload: ${tUpload.toFixed(1)} ms | Banco: ${tDatabase.toFixed(1)} ms]`
       );
 
@@ -978,7 +1031,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       }
     } catch (error: any) {
       const tError = performance.now();
-      console.error(`[CADASTRO] Erro detalhado ao salvar cadastro (${(tError - tStart).toFixed(1)} ms):`, error);
+      console.error(`[DEBUG_FOTO] ❌ Erro detalhado ao salvar cadastro (${(tError - tStart).toFixed(1)} ms):`, error);
 
       const msg = String(error?.message || '').toLowerCase();
       const isAuthError = Boolean(
@@ -993,34 +1046,21 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         msg.includes('pgrst301')
       );
 
-      const isNetworkError = Boolean(
-        !navigator.onLine ||
-        msg.includes('failed to fetch') ||
-        msg.includes('network') ||
-        msg.includes('conexão') ||
-        msg.includes('connection')
-      );
-
       if (isAuthError) {
         showToast(
           'Sua sessão expirou ou precisa de renovação. Seus dados continuam preenchidos no formulário. Tente salvar novamente.',
           'error'
         );
-      } else if (isNetworkError) {
-        showToast(
-          'Falha na conexão com a internet. Seus dados continuam preenchidos. Verifique sua rede e tente novamente.',
-          'error'
-        );
       } else {
+        // Mensagem padrão e clara em português para qualquer falha de rede/timeout/servidor
         showToast(
-          error?.message && error.message.length < 150
-            ? error.message
-            : 'Não foi possível salvar seu cadastro no banco de dados. Seus dados continuam preservados no formulário. Verifique as informações e tente novamente.',
+          'Não foi possível salvar. Verifique sua conexão e tente novamente.',
           'error'
         );
       }
       // REGRA CRÍTICA: Não chamamos reset(), não chamamos onComplete(), mantendo os dados no formulário e o rascunho intacto
     } finally {
+      clearSlowTimer();
       isSubmittingRef.current = false;
       setIsSubmittingForm(false);
       setSaveStage('idle');
@@ -2105,8 +2145,22 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                         setTempImageSrc(workingImage);
                         setCropperOpen(true);
                       } catch (err) {
-                        console.error('Erro ao preparar imagem para enquadramento:', err);
-                        showToast('Não foi possível carregar a foto selecionada. Tente outra imagem.', 'error');
+                        console.error('[DEBUG_FOTO] Erro ao preparar imagem para enquadramento:', err);
+                        const isHeic = file.name.toLowerCase().endsWith('.heic') || 
+                                      file.name.toLowerCase().endsWith('.heif') || 
+                                      file.type.includes('heic') || 
+                                      file.type.includes('heif');
+                        if (isHeic) {
+                          showToast(
+                            'Foto em formato HEIC não suportada diretamente pelo navegador. Por favor, escolha outra foto ou ajuste a câmera para "Mais compatível" em Ajustes > Câmera > Formatos.',
+                            'error'
+                          );
+                        } else {
+                          showToast(
+                            'Não foi possível carregar a foto selecionada. Se for do iPhone, tente outra foto ou ajuste a câmera para "Mais compatível".',
+                            'error'
+                          );
+                        }
                       } finally {
                         setIsPreparingPhoto(false);
                         e.target.value = '';
@@ -2238,15 +2292,22 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                   “Ao atualizar seus dados, você confirma que as informações são verdadeiras e estão de acordo com nossa Política de Privacidade.”
                 </p>
                 {isSubmittingForm && (
-                  <div className="flex items-center gap-2 px-3 py-2 bg-neutral-100 rounded-lg border border-neutral-300 text-xs font-medium text-neutral-800">
-                    <Loader2 className="w-4 h-4 animate-spin text-black shrink-0" />
-                    <span>
-                      {saveStage === 'preparing' && '1/4 - Preparando imagens e dados...'}
-                      {saveStage === 'uploading' && '2/4 - Enviando fotos para o servidor...'}
-                      {saveStage === 'saving' && '3/4 - Salvando informações no banco de dados...'}
-                      {saveStage === 'finalizing' && '4/4 - Finalizando cadastro com segurança...'}
-                      {saveStage === 'idle' && 'Salvando cadastro...'}
-                    </span>
+                  <div className="flex flex-col gap-1.5 w-full">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-neutral-100 rounded-lg border border-neutral-300 text-xs font-medium text-neutral-800">
+                      <Loader2 className="w-4 h-4 animate-spin text-black shrink-0" />
+                      <span>
+                        {saveStage === 'preparing' && '1/4 - Preparando imagens e dados...'}
+                        {saveStage === 'uploading' && '2/4 - Enviando fotos para o servidor...'}
+                        {saveStage === 'saving' && '3/4 - Salvando informações no banco de dados...'}
+                        {saveStage === 'finalizing' && '4/4 - Finalizando cadastro com segurança...'}
+                        {saveStage === 'idle' && 'Salvando cadastro...'}
+                      </span>
+                    </div>
+                    {isSlowConnection && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-lg border border-amber-200 text-xs font-medium text-amber-800 animate-pulse">
+                        <span>⚠️ Sua conexão está lenta, continue aguardando...</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <Button 
