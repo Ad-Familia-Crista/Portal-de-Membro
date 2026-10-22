@@ -138,7 +138,8 @@ export const ALL_DEPT_ROLES = [
   'Líder',
   'Vice-Líder',
   'Coordenador',
-  'Regente'
+  'Regente',
+  'Professor(a)'
 ] as const;
 
 export type DeptRole = typeof ALL_DEPT_ROLES[number];
@@ -147,7 +148,8 @@ export const LEADERSHIP_ROLES = [
   'Líder',
   'Vice-Líder',
   'Coordenador',
-  'Regente'
+  'Regente',
+  'Professor(a)'
 ] as const;
 
 export type LeadershipRole = typeof LEADERSHIP_ROLES[number];
@@ -157,6 +159,7 @@ export const DEPARTMENTS = [
   'Dep. Lideres',
   'Dep. Secretaria',
   'Dep. Mídia',
+  'Dep. Músicos',
   'Dep. Rosas de Saron',
   'Dep. Evangelismo',
   'Dep. Tesouraria',
@@ -166,16 +169,29 @@ export const DEPARTMENTS = [
   'Dep. Recepção',
   'Dep. Escola Biblica Dominical',
   'Dep. Ele Vem',
-  'Dep. Corderinhos',
+  'Dep. Cordeirinhos',
   'Nenhum Departamento'
 ];
 
 export const CHILD_DEPARTMENTS = [
   'Nenhum Departamento',
   'Dep. Ele Vem',
-  'Dep. Corderinhos',
+  'Dep. Cordeirinhos',
   'Dep. The Search'
 ];
+
+/**
+ * Normaliza grafias legadas de departamentos para compatibilidade retroativa com dados anteriores.
+ * Trata 'Dep. Corderinhos' como equivalente a 'Dep. Cordeirinhos'.
+ */
+export const normalizeLegacyDept = (dept?: string | null): string => {
+  if (!dept || typeof dept !== 'string') return '';
+  const trimmed = dept.trim();
+  if (trimmed.toLowerCase() === 'dep. corderinhos') {
+    return 'Dep. Cordeirinhos';
+  }
+  return trimmed;
+};
 
 export const CONSECRATIONS = [
   'Obreiro',
@@ -192,10 +208,14 @@ export const CONSECRATIONS = [
 
 export const POSITIONS = [
   'Membro',
+  'Cooperador',
   'Obreiro',
   'Diácono',
+  'Diaconisa',
   'Presbítero',
   'Evangelista',
+  'Missionário',
+  'Missionária',
   'Pastor'
 ];
 

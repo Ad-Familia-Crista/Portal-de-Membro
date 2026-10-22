@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, MinisterialEvent } from '../types';
+import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, MinisterialEvent, normalizeLegacyDept } from '../types';
 import {
   Search,
   Edit2,
@@ -113,7 +113,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         (m.firstName || '').toLowerCase().includes(term) ||
         (m.lastName || '').toLowerCase().includes(term) ||
         (m.email || '').toLowerCase().includes(term) ||
-        (m.cpf || '').includes(searchTerm)
+        (m.cpf || '').includes(searchTerm) ||
+        (m.departments || []).some(d => normalizeLegacyDept(d).toLowerCase().includes(term))
       );
     });
   }, [members, searchTerm]);
@@ -369,6 +370,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           alignment: 'center', 
           formatter: m => m.birthDate ? m.birthDate.split('-').reverse().join('/') : '' 
         },
+        { 
+          header: 'Departamentos', 
+          key: 'departments', 
+          alignment: 'left', 
+          formatter: m => {
+            const depts = (m.departments || [])
+              .filter(d => d && d !== 'Nenhum Departamento')
+              .map(d => {
+                const clean = normalizeLegacyDept(d);
+                const role = m.departmentRoles?.[d] || m.departmentRoles?.[clean];
+                return role && role !== 'Integrante' && role !== 'Membro'
+                  ? `${clean} (${role})`
+                  : clean;
+              });
+            return depts.join(', ') || '—';
+          } 
+        },
         { header: 'CPF', key: 'cpf', alignment: 'center', dataType: 'string', formatter: m => m.cpf || '' },
         { header: 'RG', key: 'rg', alignment: 'center', dataType: 'string', formatter: m => m.rg || '' },
         { header: 'WhatsApp / Celular', key: 'cell', alignment: 'center', dataType: 'string', formatter: m => m.cell || '' },
@@ -392,7 +410,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         { header: 'Batismo Espírito Santo', key: 'isHolySpiritBaptized', alignment: 'center', formatter: m => m.isHolySpiritBaptized ? 'Sim' : 'Não' },
         { header: 'Data de Entrada', key: 'entryDate', alignment: 'center', formatter: m => m.entryDate || '' },
         { header: 'Posição Atual', key: 'currentPosition', alignment: 'left', formatter: m => m.currentPosition || '' },
-        { header: 'Departamentos', key: 'departments', alignment: 'left', formatter: m => (m.departments || []).join(', ') },
       ],
     });
   };
@@ -420,7 +437,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
               type="text"
-              placeholder="Buscar por nome, e-mail ou CPF..."
+              placeholder="Buscar por nome, e-mail, CPF ou departamento..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
@@ -443,12 +460,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             </div>
           )}
 
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className="bg-background/40 text-[10px] uppercase tracking-wider font-bold text-muted">
                 <th className="px-6 py-3 border-b border-muted/10">Membro</th>
                 <th className="px-6 py-3 border-b border-muted/10">Status</th>
                 <th className="px-6 py-3 border-b border-muted/10">Perfil</th>
+                <th className="px-6 py-3 border-b border-muted/10 min-w-[200px]">Departamentos</th>
                 <th className="px-6 py-3 border-b border-muted/10">CPF</th>
                 <th className="px-6 py-3 border-b border-muted/10 text-right">Ações</th>
               </tr>
@@ -456,7 +474,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             <tbody className="divide-y divide-muted/10">
               {filteredMembers.length === 0 && !loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-muted italic">
+                  <td colSpan={6} className="px-6 py-10 text-center text-muted italic">
                     Nenhum membro encontrado.
                   </td>
                 </tr>
@@ -498,6 +516,41 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         <Shield className="w-3 h-3" />
                         {member.role}
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {(() => {
+                        const validDepts = (member.departments || [])
+                          .filter((d) => d && d !== 'Nenhum Departamento');
+                        
+                        if (validDepts.length === 0) {
+                          return <span className="text-muted/60 text-xs">—</span>;
+                        }
+
+                        return (
+                          <div className="flex flex-wrap gap-1 max-w-[240px] max-h-[72px] overflow-y-auto pr-1">
+                            {validDepts.map((rawDept) => {
+                              const dept = normalizeLegacyDept(rawDept);
+                              const role = member.departmentRoles?.[rawDept] || member.departmentRoles?.[dept];
+                              const isLead = role && role !== 'Integrante' && role !== 'Membro';
+
+                              return (
+                                <span
+                                  key={rawDept}
+                                  className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border whitespace-nowrap ${
+                                    isLead
+                                      ? 'bg-primary/10 text-primary border-primary/25 font-bold'
+                                      : 'bg-muted/10 text-neutral-700 border-muted/20'
+                                  }`}
+                                  title={role ? `${dept} (${role})` : dept}
+                                >
+                                  {dept}
+                                  {isLead && <span className="ml-1 opacity-80 font-normal">({role})</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 text-xs text-muted font-mono">
                       {member.cpf}
@@ -864,7 +917,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                     <span className="ml-1 text-[9px] bg-black/10 text-black/60 px-1.5 py-0.5 rounded font-mono">Admin/Sec</span>
                                   </label>
                                   <select
-                                    value={(child.departments && child.departments[0]) || 'Nenhum Departamento'}
+                                    value={normalizeLegacyDept((child.departments && child.departments[0]) || 'Nenhum Departamento')}
                                     onChange={(e) => {
                                       const newChildren = [...(selectedMember.children || [])];
                                       newChildren[idx].departments = [e.target.value];

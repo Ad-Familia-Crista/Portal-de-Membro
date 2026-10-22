@@ -7,7 +7,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Card } from '../components/Card';
 import { DatePickerInput } from '../components/DatePickerInput';
-import { DEPARTMENTS, CONSECRATIONS, POSITIONS, CHILD_DEPARTMENTS, BRAZILIAN_STATES, ALL_COUNTRIES } from '../types';
+import { DEPARTMENTS, CONSECRATIONS, POSITIONS, CHILD_DEPARTMENTS, BRAZILIAN_STATES, ALL_COUNTRIES, normalizeLegacyDept } from '../types';
 import { motion } from 'motion/react';
 import { maskCPF, maskRG, maskCEP, maskPhone, maskDate, maskMonthYear, maskYear, isValidCPF, cn } from '../utils';
 import { Plus, Trash2, Camera, Info as InfoIcon, ShieldAlert, History, Crop, Loader2, HelpCircle, Lock, CheckCircle2 } from 'lucide-react';
@@ -342,10 +342,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
       children: user?.children?.map(c => ({ 
         ...c, 
         birthDate: toDisplayDate(c.birthDate),
-        congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
+        congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim'),
+        departments: c.departments?.map(normalizeLegacyDept)
       })) || [],
       phones: user?.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
-      departments: user?.departments || [],
+      departments: user?.departments?.map(normalizeLegacyDept) || [],
       departmentRoles: user?.departmentRoles || {},
       departmentStartDate: user?.departmentStartDate || '',
       currentPosition: user?.currentPosition || 'Membro',
@@ -402,10 +403,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         children: user.children?.map(c => ({ 
           ...c, 
           birthDate: toDisplayDate(c.birthDate),
-          congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim') 
+          congregates: typeof c.congregates === 'boolean' ? (c.congregates ? 'Sim' : 'Não') : (c.congregates || 'Sim'),
+          departments: c.departments?.map(normalizeLegacyDept)
         })) || [],
         phones: user.phones?.map(p => typeof p === 'string' ? { number: p } : p) || [],
-        departments: user.departments || [],
+        departments: user.departments?.map(normalizeLegacyDept) || [],
         departmentRoles: user.departmentRoles || {},
         departmentStartDate: user.departmentStartDate || '',
         currentPosition: user.currentPosition || 'Membro',
@@ -418,7 +420,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
         originalPhotoRef.current = user.photoUrl;
       }
       // Sincroniza campos ministeriais e dados frescos quando o perfil for recarregado do banco
-      setValue('departments', user.departments || []);
+      setValue('departments', user.departments?.map(normalizeLegacyDept) || []);
       setValue('departmentRoles', user.departmentRoles || {});
       setValue('leaderDepartment', user.leaderDepartment || '');
       setValue('currentPosition', user.currentPosition || 'Membro');

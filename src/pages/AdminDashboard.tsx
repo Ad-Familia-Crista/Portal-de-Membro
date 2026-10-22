@@ -148,12 +148,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
     { label: 'Membros Inativos', value: inactiveMembers, icon: UserX, color: 'bg-rose-600' },
   ];
 
-  // Mapeamento centralizado dos 15 departamentos oficiais para o gráfico
+  // Mapeamento centralizado dos 16 departamentos oficiais para o gráfico
   const DEPT_CHART_LIST = [
     { label: 'Dep. The Search', memberKey: 'The Search' },
     { label: 'Dep. Lideres', memberKey: 'Lideres' },
     { label: 'Dep. Secretaria', memberKey: 'Secretaria' },
     { label: 'Dep. Mídia', memberKey: 'Mídia' },
+    { label: 'Dep. Músicos', memberKey: 'Músicos' },
     { label: 'Dep. Rosas de Saron', memberKey: 'Rosas de Saron' },
     { label: 'Dep. Evangelismo', memberKey: 'Evangelismo' },
     { label: 'Dep. Tesouraria', memberKey: 'Tesouraria' },
@@ -163,12 +164,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
     { label: 'Dep. Recepção', memberKey: 'Recepção' },
     { label: 'Dep. Escola Biblica Dominical', memberKey: 'Escola Biblica' },
     { label: 'Dep. Ele Vem', memberKey: 'Ele Vem' },
-    { label: 'Dep. Corderinhos', memberKey: 'Corderinhos' },
+    { label: 'Dep. Cordeirinhos', memberKey: 'Cordeirinhos' },
     { label: 'Nenhum Departamento', memberKey: 'Nenhum' },
   ];
 
   const standardDeptsLower = [
-    'the search', 'lideres', 'secretaria', 'mídia', 'midia', 'rosas de saron',
+    'the search', 'lideres', 'secretaria', 'mídia', 'midia', 'músicos', 'musicos', 'rosas de saron',
     'evangelismo', 'tesouraria', 'louvor', 'som', 'tecnica', 'obreiros',
     'recepção', 'recepcao', 'escola biblica', 'ele vem', 'corderinhos', 'cordeirinhos', 'nenhum'
   ];
@@ -195,7 +196,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
       return { name: label, value: childCount };
     }
 
-    if (label === 'Dep. Corderinhos') {
+    if (label === 'Dep. Cordeirinhos' || label === 'Dep. Corderinhos') {
       const childCount = memberList.reduce((acc, m) => {
         if (!m.children) return acc;
         return acc + m.children.filter(c => {
@@ -203,7 +204,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
           return dept.toLowerCase().includes('corderinhos') || dept.toLowerCase().includes('cordeirinhos');
         }).length;
       }, 0);
-      return { name: label, value: childCount };
+      return { name: 'Dep. Cordeirinhos', value: childCount };
     }
 
     if (label === 'Dep. The Search') {

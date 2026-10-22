@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { DEPARTMENTS } from '../types';
+import { DEPARTMENTS, normalizeLegacyDept } from '../types';
 
 const STORAGE_KEY = 'adfc_custom_departments';
 
@@ -25,10 +25,12 @@ const notifyListeners = (allDepts: string[]) => {
 };
 
 /**
- * Normaliza o nome do departamento: remove espaços múltiplos e padroniza trim
+ * Normaliza o nome do departamento: remove espaços múltiplos, padroniza trim
+ * e trata grafias legadas (ex: Dep. Corderinhos -> Dep. Cordeirinhos)
  */
 export const normalizeDeptName = (name: string): string => {
-  return (name || '').trim().replace(/\s+/g, ' ');
+  const trimmed = (name || '').trim().replace(/\s+/g, ' ');
+  return normalizeLegacyDept(trimmed);
 };
 
 /**
