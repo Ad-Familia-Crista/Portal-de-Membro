@@ -111,7 +111,7 @@ export interface Member {
   currentPosition: string;
   positionStartDate: string;
   departments: string[];
-  departmentRoles?: Record<string, string>; // Mapeia "Nome do Departamento" -> Papel ("Membro", "Líder", "Vice-Líder", "Coordenador", "Regente")
+  departmentRoles?: Record<string, string | string[]>; // Mapeia "Nome do Departamento" -> Papel ou lista de papéis (ex: "Líder", ["Líder", "Professor(a)"])
   departmentStartDate?: string; // Data de entrada no departamento atual
   leaderDepartment?: string;
   
@@ -140,7 +140,8 @@ export const ALL_DEPT_ROLES = [
   'Coordenador',
   'Regente',
   'Professor(a)',
-  'Secretário(a)'
+  'Secretário(a)',
+  'Auxiliar'
 ] as const;
 
 export type DeptRole = typeof ALL_DEPT_ROLES[number];
@@ -151,14 +152,32 @@ export const LEADERSHIP_ROLES = [
   'Coordenador',
   'Regente',
   'Professor(a)',
-  'Secretário(a)'
+  'Secretário(a)',
+  'Auxiliar'
 ] as const;
 
 export type LeadershipRole = typeof LEADERSHIP_ROLES[number];
 
+/**
+ * Normaliza o valor de função de um departamento para uma lista de strings.
+ * Aceita tanto o formato legado (string única como "Líder") quanto o novo (string[] como ["Líder", "Professor(a)"]).
+ */
+export function normalizeDeptRoleList(roleValue: unknown): string[] {
+  if (!roleValue) return ['Integrante'];
+  if (Array.isArray(roleValue)) {
+    const valid = roleValue.map(r => String(r).trim()).filter(Boolean);
+    return valid.length > 0 ? valid : ['Integrante'];
+  }
+  if (typeof roleValue === 'string') {
+    const trimmed = roleValue.trim();
+    return trimmed ? [trimmed] : ['Integrante'];
+  }
+  return ['Integrante'];
+}
+
 export const DEPARTMENTS = [
   'Dep. The Search',
-  'Dep. Lideres',
+  'Dep. Líderes',
   'Dep. Secretaria',
   'Dep. Mídia',
   'Dep. Músicos',
@@ -192,6 +211,7 @@ export const CHILD_DEPARTMENTS = [
  *   'Dep. Som/Tecnica'          -> 'Dep. Técnico/Som'
  *   'Dep. Som/Técnica'          -> 'Dep. Técnico/Som'
  *   'Dep. Escola Biblica Dominical' -> 'Dep. Escola Bíblica Dominical'
+ *   'Dep. Lideres'              -> 'Dep. Líderes'
  */
 export const normalizeLegacyDept = (dept?: string | null): string => {
   if (!dept || typeof dept !== 'string') return '';
@@ -200,6 +220,7 @@ export const normalizeLegacyDept = (dept?: string | null): string => {
   if (lower === 'dep. corderinhos') return 'Dep. Cordeirinhos';
   if (lower === 'dep. som/tecnica' || lower === 'dep. som/técnica') return 'Dep. Técnico/Som';
   if (lower === 'dep. escola biblica dominical') return 'Dep. Escola Bíblica Dominical';
+  if (lower === 'dep. lideres') return 'Dep. Líderes';
   return trimmed;
 };
 

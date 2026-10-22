@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, WorshipFrequency, CULT_THEMES } from '../types';
+import { Member, WorshipFrequency, CULT_THEMES, normalizeLegacyDept } from '../types';
 import { supabase } from '../lib/supabase';
 import { toCamel } from '../lib/mapper';
 import { memoryCache } from '../lib/cache';
@@ -151,7 +151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
   // Mapeamento centralizado dos 16 departamentos oficiais para o gráfico
   const DEPT_CHART_LIST = [
     { label: 'Dep. The Search', memberKey: 'The Search' },
-    { label: 'Dep. Lideres', memberKey: 'Lideres' },
+    { label: 'Dep. Líderes', memberKey: 'Líderes' },
     { label: 'Dep. Secretaria', memberKey: 'Secretaria' },
     { label: 'Dep. Mídia', memberKey: 'Mídia' },
     { label: 'Dep. Músicos', memberKey: 'Músicos' },
@@ -219,7 +219,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ members, loading
       return { name: label, value: memberCount + childCount };
     }
 
-    const memberCount = memberList.filter(m => (m.departments || []).some(d => d.toLowerCase().includes(memberKey.toLowerCase()))).length;
+    const memberCount = memberList.filter(m => (m.departments || []).some(d => normalizeLegacyDept(d).toLowerCase().includes(memberKey.toLowerCase()))).length;
     return { name: label, value: memberCount };
   });
 

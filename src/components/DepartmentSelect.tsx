@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, X, Users, Check, ChevronDown, Loader2, Sparkles } from 'lucide-react';
-import { ALL_DEPT_ROLES, DeptRole } from '../types';
+import { ALL_DEPT_ROLES, DeptRole, normalizeDeptRoleList } from '../types';
 import {
   loadAllDepartments,
   addDepartment,
@@ -10,8 +10,8 @@ import {
 
 export interface DepartmentSelectProps {
   selectedDepartments: string[];
-  departmentRoles?: Record<string, string>;
-  onChange: (departments: string[], roles: Record<string, string>) => void;
+  departmentRoles?: Record<string, string | string[]>;
+  onChange: (departments: string[], roles: Record<string, string[]>) => void;
   disabled?: boolean;
   error?: string;
 }
@@ -63,6 +63,16 @@ export const DepartmentSelect: React.FC<DepartmentSelectProps> = ({
   // Normalização do termo de busca
   const cleanSearch = normalizeDeptName(searchQuery);
 
+  // Normaliza o objeto departmentRoles recebido para garantir Record<string, string[]>
+  const normalizedRoles: Record<string, string[]> = React.useMemo(() => {
+    const res: Record<string, string[]> = {};
+    if (!departmentRoles) return res;
+    Object.entries(departmentRoles).forEach(([dept, val]) => {
+      res[dept] = normalizeDeptRoleList(val);
+    });
+    return res;
+  }, [departmentRoles]);
+
   // Departamentos disponíveis que ainda não foram selecionados
   const availableDepts = allDepts.filter(
     (d) =>
@@ -85,7 +95,10 @@ export const DepartmentSelect: React.FC<DepartmentSelectProps> = ({
     const clean = normalizeDeptName(deptName);
     if (!selectedDepartments.includes(clean)) {
       const nextDepts = [...selectedDepartments, clean];
-      const nextRoles = { ...departmentRoles, [clean]: departmentRoles[clean] || 'Integrante' };
+      const nextRoles: Record<string, string[]> = {
+        ...normalizedRoles,
+        [clean]: normalizedRoles[clean] && normalizedRoles[clean].length > 0 ? normalizedRoles[clean] : ['Integrante']
+      };
       onChange(nextDepts, nextRoles);
     }
     setSearchQuery('');
@@ -97,15 +110,39 @@ export const DepartmentSelect: React.FC<DepartmentSelectProps> = ({
   const handleRemoveDept = (deptName: string) => {
     if (disabled) return;
     const nextDepts = selectedDepartments.filter((d) => d !== deptName);
-    const nextRoles = { ...departmentRoles };
+    const nextRoles: Record<string, string[]> = { ...normalizedRoles };
     delete nextRoles[deptName];
     onChange(nextDepts, nextRoles);
   };
 
-  // Alterar papel do membro no departamento
-  const handleRoleChange = (deptName: string, newRole: DeptRole) => {
+  // Alternar papel/função do membro no departamento (permite 1 ou mais)
+  const handleToggleRole = (deptName: string, roleToToggle: DeptRole) => {
     if (disabled) return;
-    const nextRoles = { ...departmentRoles, [deptName]: newRole };
+    const current = normalizedRoles[deptName] || ['Integrante'];
+    let next: string[];
+
+    if (roleToToggle === 'Integrante') {
+      // Clicar em Integrante redefine para apenas 'Integrante'
+      next = ['Integrante'];
+    } else {
+      // Remove 'Integrante' e 'Membro' caso existam ao selecionar funções de liderança
+      const withoutBase = current.filter(r => r !== 'Integrante' && r !== 'Membro');
+      if (withoutBase.includes(roleToToggle)) {
+        // Desmarcando função específica
+        next = withoutBase.filter(r => r !== roleToToggle);
+        if (next.length === 0) {
+          next = ['Integrante'];
+        }
+      } else {
+        // Marcando nova função específica
+        next = [...withoutBase, roleToToggle];
+      }
+    }
+
+    const nextRoles: Record<string, string[]> = {
+      ...normalizedRoles,
+      [deptName]: next,
+    };
     onChange(selectedDepartments, nextRoles);
   };
 
@@ -119,9 +156,9 @@ export const DepartmentSelect: React.FC<DepartmentSelectProps> = ({
     try {
       const result = await addDepartment(cleanSearch);
       if (result.success) {
-        // Vincula automaticamente ao membro atual com o papel padrão "Membro"
+        // Vincula automaticamente ao membro atual com o papel padrão "Integrante"
         const nextDepts = [...selectedDepartments, cleanSearch];
-        const nextRoles = { ...departmentRoles, [cleanSearch]: 'Integrante' };
+        const nextRoles: Record<string, string[]> = { ...normalizedRoles, [cleanSearch]: ['Integrante'] };
         onChange(nextDepts, nextRoles);
 
         setSearchQuery('');
@@ -296,72 +333,89 @@ export const DepartmentSelect: React.FC<DepartmentSelectProps> = ({
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {selectedDepartments.map((dept) => {
-              const currentRole = (departmentRoles[dept] as DeptRole) || 'Integrante';
-              const isLeadership = currentRole !== 'Integrante';
+              const currentRoles = normalizedRoles[dept] || ['Integrante'];
+              const leadershipRoles = currentRoles.filter(
+                (r) => r !== 'Integrante' && r !== 'Membro'
+              );
+              const isLeadership = leadershipRoles.length > 0;
 
               return (
                 <div
                   key={dept}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border transition-all ${
+                  className={`p-3.5 rounded-xl border transition-all ${
                     isLeadership
                       ? 'bg-primary/[0.04] border-primary/30 shadow-xs'
                       : 'bg-white border-black/10'
                   }`}
                 >
-                  {/* Nome do departamento */}
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        isLeadership ? 'bg-primary' : 'bg-muted/40'
-                      }`}
-                    />
-                    <span className="text-sm font-bold text-black truncate">{dept}</span>
-                    {isLeadership && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">
-                        {currentRole}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Seletor de Papel / Função */}
-                  <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold text-muted uppercase">Função:</span>
-                      <select
-                        value={currentRole}
-                        disabled={disabled}
-                        onChange={(e) => handleRoleChange(dept, e.target.value as DeptRole)}
-                        className={`h-8 px-2.5 py-1 text-xs font-semibold rounded-lg border bg-white cursor-pointer outline-none transition-all ${
-                          isLeadership
-                            ? 'border-primary text-primary focus:ring-2 focus:ring-primary/20 font-bold'
-                            : 'border-black/20 text-black/80 hover:border-black/40'
+                  {/* Cabeçalho do Card: Nome do departamento e botão de remover */}
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          isLeadership ? 'bg-primary' : 'bg-muted/40'
                         }`}
-                      >
-                        {ALL_DEPT_ROLES.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                        {/* Compatibilidade retroativa: exibir 'Membro' como 'Integrante' para registros antigos */}
-                        {Object.values(departmentRoles).includes('Membro') && (
-                          <option value="Membro" style={{ display: 'none' }}>Membro (legado)</option>
-                        )}
-                      </select>
+                      />
+                      <span className="text-sm font-bold text-black truncate">{dept}</span>
+                      {isLeadership && (
+                        <div className="flex flex-wrap gap-1">
+                          {leadershipRoles.map((role) => (
+                            <span
+                              key={role}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20"
+                            >
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Botão de Remover */}
                     {!disabled && (
                       <button
                         type="button"
                         onClick={() => handleRemoveDept(dept)}
-                        className="p-1.5 text-muted hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        className="p-1.5 text-muted hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
                         title="Desvincular departamento"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     )}
+                  </div>
+
+                  {/* Seleção de Funções (Uma ou mais opções) */}
+                  <div className="pt-2 border-t border-black/5">
+                    <span className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                      Funções neste departamento:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ALL_DEPT_ROLES.map((role) => {
+                        const isSelected = currentRoles.includes(role);
+                        const isPrimary = isSelected && role !== 'Integrante';
+
+                        return (
+                          <button
+                            key={role}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => handleToggleRole(dept, role)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              isSelected
+                                ? isPrimary
+                                  ? 'bg-primary text-white border border-primary shadow-xs font-bold'
+                                  : 'bg-neutral-800 text-white border border-neutral-800 shadow-xs'
+                                : 'bg-black/[0.03] text-neutral-700 hover:bg-black/[0.08] border border-black/10'
+                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title={`Alternar função "${role}" em ${dept}`}
+                          >
+                            {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            <span>{role}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );

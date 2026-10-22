@@ -1,10 +1,11 @@
 import React from 'react';
-import { ShieldAlert, Award, Users, Church, History } from 'lucide-react';
+import { ShieldAlert, Award, Users, Church, History, BadgeCheck } from 'lucide-react';
 
 export interface MinisterialEvolutionViewProps {
   departments?: string[];
-  departmentRoles?: Record<string, string>;
+  departmentRoles?: Record<string, string | string[]>;
   leaderDepartment?: string;
+  currentPosition?: string | string[];
   consecratedTo?: string;
   consecrationDate?: string;
   children?: Array<{ name?: string; departments?: string[] }>;
@@ -17,6 +18,7 @@ export const MinisterialEvolutionView: React.FC<MinisterialEvolutionViewProps> =
   departments = [],
   departmentRoles = {},
   leaderDepartment = '',
+  currentPosition = '',
   consecratedTo = '',
   consecrationDate = '',
   children = [],
@@ -36,7 +38,7 @@ export const MinisterialEvolutionView: React.FC<MinisterialEvolutionViewProps> =
   const coveredDepts = new Set<string>();
 
   // Normaliza departmentRoles caso venha serializado em string JSON
-  let rolesMap: Record<string, string> = {};
+  let rolesMap: Record<string, any> = {};
   if (typeof departmentRoles === 'string') {
     try {
       rolesMap = JSON.parse(departmentRoles);
@@ -44,15 +46,18 @@ export const MinisterialEvolutionView: React.FC<MinisterialEvolutionViewProps> =
       rolesMap = {};
     }
   } else if (departmentRoles && typeof departmentRoles === 'object') {
-    rolesMap = departmentRoles as Record<string, string>;
+    rolesMap = departmentRoles;
   }
 
   // A) Através de departmentRoles (fonte principal):
-  Object.entries(rolesMap).forEach(([dept, role]) => {
-    if (dept && role && !NON_LEADERSHIP.has(role)) {
-      leadershipItems.push({ role, department: dept });
-      coveredDepts.add(dept);
-    }
+  Object.entries(rolesMap).forEach(([dept, roleVal]) => {
+    const rolesList = Array.isArray(roleVal) ? roleVal : [roleVal];
+    rolesList.forEach((role) => {
+      if (dept && role && !NON_LEADERSHIP.has(role)) {
+        leadershipItems.push({ role, department: dept });
+        coveredDepts.add(dept);
+      }
+    });
   });
 
   // B) Fallback de compatibilidade retroativa com leaderDepartment legado
@@ -85,7 +90,40 @@ export const MinisterialEvolutionView: React.FC<MinisterialEvolutionViewProps> =
 
   const hasLeadership = leadershipItems.length > 0;
 
-  // 3. Condição para Consagração / Ordenação
+  // 3. Condição Atual (Oculta se for "Membro", vazia, nula ou inexistente)
+  const validPositions: string[] = React.useMemo(() => {
+    if (!currentPosition) return [];
+
+    let items: string[] = [];
+    if (Array.isArray(currentPosition)) {
+      items = currentPosition.flatMap((item) =>
+        typeof item === 'string' ? item.split(/[,;/]+/) : []
+      );
+    } else if (typeof currentPosition === 'string') {
+      items = currentPosition.split(/[,;/]+/);
+    }
+
+    return items
+      .map((p) => (typeof p === 'string' ? p.trim() : ''))
+      .filter((p) => {
+        if (!p) return false;
+        const normalized = p
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .trim();
+        return (
+          normalized !== 'membro' &&
+          normalized !== 'membro(a)' &&
+          normalized !== 'nenhum' &&
+          normalized !== 'nao informado'
+        );
+      });
+  }, [currentPosition]);
+
+  const hasPosition = validPositions.length > 0;
+
+  // 4. Condição para Consagração / Ordenação
   const cleanConsecratedTo = (consecratedTo || '').trim();
   const hasConsecration = Boolean(
     cleanConsecratedTo &&
@@ -178,7 +216,30 @@ export const MinisterialEvolutionView: React.FC<MinisterialEvolutionViewProps> =
         </div>
       )}
 
-      {/* BLOCO 3: CONSAGRAÇÃO / ORDENAÇÃO (Exibição Condicional) */}
+      {/* BLOCO: CONDIÇÃO ATUAL (Exibição Condicional - Oculta se for "Membro" ou vazia) */}
+      {hasPosition && (
+        <div className="bg-white rounded-2xl border border-black/10 p-5 shadow-xs transition-all hover:border-black/20">
+          <div className="flex items-center gap-2 mb-3.5 pb-2.5 border-b border-black/5">
+            <BadgeCheck className="w-4 h-4 text-secondary" />
+            <h4 className="text-xs font-bold text-black uppercase tracking-wider">
+              Condição Atual
+            </h4>
+          </div>
+
+          <div className="flex flex-wrap gap-2.5">
+            {validPositions.map((pos, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-bold bg-secondary/15 text-[#8F6600] border border-secondary/35 shadow-xs"
+              >
+                {pos}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* BLOCO: CONSAGRAÇÃO / ORDENAÇÃO (Exibição Condicional) */}
       {hasConsecration && (
         <div className="bg-white rounded-2xl border border-black/10 p-5 shadow-xs transition-all hover:border-black/20">
           <div className="flex items-center gap-2 mb-3.5 pb-2.5 border-b border-black/5">

@@ -81,7 +81,7 @@ const schema = z.object({
 
   receivedAs: z.enum(['MEMBRO', 'CONGREGADO']).optional(),
   departments: z.array(z.string()).optional(),
-  departmentRoles: z.record(z.string(), z.string()).optional(),
+  departmentRoles: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
   leaderDepartment: z.string().optional(),
   currentPosition: z.string().optional(),
   positionStartDate: z.string().optional(),
@@ -1977,6 +1977,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                     departments={user?.departments || watch('departments') || []}
                     departmentRoles={user?.departmentRoles || watch('departmentRoles') || {}}
                     leaderDepartment={user?.leaderDepartment || watch('leaderDepartment') || ''}
+                    currentPosition={user?.currentPosition || watch('currentPosition') || ''}
                     consecratedTo={user?.consecratedTo || watch('consecratedTo') || ''}
                     consecrationDate={user?.consecrationDate || watch('consecrationDate') || ''}
                     children={watch('children') || user?.children || []}
@@ -2030,9 +2031,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onComplete }
                             setValue('departments', nextDepts, { shouldDirty: true });
                             setValue('departmentRoles', nextRoles, { shouldDirty: true });
                             // Sincroniza leaderDepartment para compatibilidade retroativa
-                            const leaderships = Object.entries(nextRoles)
-                              .filter(([_, r]) => r !== 'Membro')
-                              .map(([d, r]) => `${r} - ${d}`);
+                            const leaderships: string[] = [];
+                            Object.entries(nextRoles).forEach(([dept, roles]) => {
+                              (Array.isArray(roles) ? roles : [roles])
+                                .filter((r) => r && r !== 'Integrante' && r !== 'Membro')
+                                .forEach((r) => leaderships.push(`${r} - ${dept}`));
+                            });
                             setValue('leaderDepartment', leaderships.join(', '), { shouldDirty: true });
                           }}
                           error={errors.departments?.message as string}

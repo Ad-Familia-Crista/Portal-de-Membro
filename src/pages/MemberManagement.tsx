@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, ALL_DEPT_ROLES, MinisterialEvent, normalizeLegacyDept } from '../types';
+import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, ALL_DEPT_ROLES, MinisterialEvent, normalizeLegacyDept, normalizeDeptRoleList } from '../types';
 import {
   Search,
   Edit2,
@@ -164,20 +164,29 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       // 2) Departamento (seleção múltipla — qualquer departamento selecionado)
       if (filterDepts.length > 0) {
         const memberDepts = (m.departments || []).map(d => normalizeLegacyDept(d));
-        const match = filterDepts.some(fd => memberDepts.includes(fd));
+        const match = filterDepts.some(fd => memberDepts.includes(normalizeLegacyDept(fd)));
         if (!match) return false;
       }
 
       // 3) Liderança (papel no departamento — seleção múltipla)
       if (filterLeadership.length > 0) {
-        const roles = Object.values(m.departmentRoles || {});
-        // Para 'Integrante': inclui membros sem roles ou com todos roles = Integrante/Membro
+        const memberRoles: string[] = [];
+        Object.values(m.departmentRoles || {}).forEach((val) => {
+          normalizeDeptRoleList(val).forEach((r) => {
+            if (r) memberRoles.push(r);
+          });
+        });
+
+        // Para 'Integrante': inclui membros sem papéis ou com apenas Integrante/Membro
         const hasIntegranteFilter = filterLeadership.includes('Integrante');
         const otherRoles = filterLeadership.filter(r => r !== 'Integrante');
-        const isIntegrante = roles.length === 0 || roles.every(r => r === 'Integrante' || r === 'Membro' || !r);
+        const isIntegrante =
+          memberRoles.length === 0 ||
+          memberRoles.every(r => r === 'Integrante' || r === 'Membro');
+
         const matchLeadership =
           (hasIntegranteFilter && isIntegrante) ||
-          otherRoles.some(lr => roles.includes(lr));
+          otherRoles.some(lr => memberRoles.includes(lr));
         if (!matchLeadership) return false;
       }
 
@@ -250,24 +259,32 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       originalPhotoRef.current = fetchedPhoto || '';
 
       // Garante sincronização de papéis de liderança se só houver leaderDepartment legado
-      let initialRoles = member.departmentRoles || {};
-      const hasLeadershipInRoles = Object.values(initialRoles).some(
-        r => r && r !== 'Integrante' && r !== 'Membro'
+      const initialRoles: Record<string, string[]> = {};
+      Object.entries(member.departmentRoles || {}).forEach(([dept, val]) => {
+        initialRoles[dept] = normalizeDeptRoleList(val);
+      });
+
+      const hasLeadershipInRoles = Object.values(initialRoles).some((roles) =>
+        roles.some((r) => r && r !== 'Integrante' && r !== 'Membro')
       );
       if (!hasLeadershipInRoles && member.leaderDepartment) {
-        const parsedRoles: Record<string, string> = { ...initialRoles };
         const segments = member.leaderDepartment.split(',').map(s => s.trim()).filter(Boolean);
         segments.forEach(seg => {
           if (seg.includes('—') || seg.includes('-')) {
             const parts = seg.split(/[—\-]/);
             const role = parts[0]?.trim() || 'Líder';
             const dept = parts.slice(1).join(' - ').trim();
-            if (dept) parsedRoles[dept] = role;
+            if (dept) {
+              const current = (initialRoles[dept] || []).filter(r => r !== 'Integrante' && r !== 'Membro');
+              if (!current.includes(role)) current.push(role);
+              initialRoles[dept] = current.length > 0 ? current : ['Integrante'];
+            }
           } else {
-            parsedRoles[seg] = 'Líder';
+            const current = (initialRoles[seg] || []).filter(r => r !== 'Integrante' && r !== 'Membro');
+            if (!current.includes('Líder')) current.push('Líder');
+            initialRoles[seg] = current.length > 0 ? current : ['Integrante'];
           }
         });
-        initialRoles = parsedRoles;
       }
 
       setSelectedMember({
@@ -302,11 +319,22 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     setIsSaving(true);
 
     try {
-      // Calcula leader_department a partir de departmentRoles para compatibilidade retroativa
-      const leaderDeptValue = selectedMember.departmentRoles
-        ? Object.entries(selectedMember.departmentRoles)
-            .filter(([_, role]) => role !== 'Integrante' && role !== 'Membro')
-            .map(([d, r]) => `${r} - ${d}`)
+      // Garante formato Record<string, string[]> para department_roles
+      const finalDeptRoles: Record<string, string[]> = {};
+      if (selectedMember.departmentRoles) {
+        Object.entries(selectedMember.departmentRoles).forEach(([d, val]) => {
+          finalDeptRoles[d] = normalizeDeptRoleList(val);
+        });
+      }
+
+      // Calcula leader_department a partir de finalDeptRoles para compatibilidade retroativa
+      const leaderDeptValue = Object.entries(finalDeptRoles).length > 0
+        ? Object.entries(finalDeptRoles)
+            .flatMap(([d, roles]) =>
+              roles
+                .filter((r) => r !== 'Integrante' && r !== 'Membro')
+                .map((r) => `${r} - ${d}`)
+            )
             .join(', ')
         : (selectedMember.leaderDepartment || '');
 
@@ -349,7 +377,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         received_as: selectedMember.receivedAs || null,
         current_position: selectedMember.currentPosition || null,
         departments: selectedMember.departments || [],
-        department_roles: selectedMember.departmentRoles || {},
+        department_roles: finalDeptRoles,
         leader_department: leaderDeptValue,
         consecrated_to: selectedMember.consecratedTo || null,
         consecration_date: selectedMember.consecrationDate || null,
@@ -409,6 +437,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
         const savedMember = {
           ...selectedMember,
+          departmentRoles: finalDeptRoles,
           leaderDepartment: leaderDeptValue,
           lastUpdated: nowIso,
         };
@@ -455,9 +484,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               .filter(d => d && d !== 'Nenhum Departamento')
               .map(d => {
                 const clean = normalizeLegacyDept(d);
-                const role = m.departmentRoles?.[d] || m.departmentRoles?.[clean];
-                return role && role !== 'Integrante' && role !== 'Membro'
-                  ? `${clean} (${role})`
+                const roleVal = m.departmentRoles?.[d] || m.departmentRoles?.[clean];
+                const roles = normalizeDeptRoleList(roleVal).filter(
+                  r => r !== 'Integrante' && r !== 'Membro'
+                );
+                return roles.length > 0
+                  ? `${clean} (${roles.join(', ')})`
                   : clean;
               });
             return depts.join(', ') || '—';
@@ -699,7 +731,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 <th className="px-6 py-3 border-b border-muted/10">Membro</th>
                 <th className="px-6 py-3 border-b border-muted/10">Status</th>
                 <th className="px-6 py-3 border-b border-muted/10">Perfil</th>
-                <th className="px-6 py-3 border-b border-muted/10 min-w-[200px]">Departamentos</th>
+                <th className="px-6 py-3 border-b border-muted/10 min-w-[220px] max-w-[340px] text-left">Departamentos</th>
                 <th className="px-6 py-3 border-b border-muted/10">CPF</th>
                 <th className="px-6 py-3 border-b border-muted/10 text-right">Ações</th>
               </tr>
@@ -728,7 +760,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 </tr>
               ) : (
                 paginatedMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-primary/5 transition-colors group">
+                  <tr key={member.id} className="hover:bg-primary/5 transition-colors group align-top">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
@@ -765,7 +797,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         {member.role}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 align-top min-w-[220px] max-w-[340px]">
                       {(() => {
                         const validDepts = (member.departments || [])
                           .filter((d) => d && d !== 'Nenhum Departamento');
@@ -775,24 +807,30 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         }
 
                         return (
-                          <div className="flex flex-wrap gap-1 max-w-[240px] max-h-[72px] overflow-y-auto pr-1">
+                          <div className="flex flex-wrap items-center gap-1.5 py-0.5">
                             {validDepts.map((rawDept) => {
                               const dept = normalizeLegacyDept(rawDept);
-                              const role = member.departmentRoles?.[rawDept] || member.departmentRoles?.[dept];
-                              const isLead = role && role !== 'Integrante' && role !== 'Membro';
+                              const roleVal = member.departmentRoles?.[rawDept] || member.departmentRoles?.[dept];
+                              const roles = normalizeDeptRoleList(roleVal).filter(
+                                (r) => r !== 'Integrante' && r !== 'Membro'
+                              );
+                              const isLead = roles.length > 0;
+                              const roleText = roles.join(', ');
 
                               return (
                                 <span
                                   key={rawDept}
-                                  className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border whitespace-nowrap ${
+                                  className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border text-left max-w-full leading-normal ${
                                     isLead
                                       ? 'bg-primary/10 text-primary border-primary/25 font-bold'
                                       : 'bg-muted/10 text-neutral-700 border-muted/20'
                                   }`}
-                                  title={role ? `${dept} (${role})` : dept}
+                                  title={isLead ? `${dept} (${roleText})` : dept}
                                 >
-                                  {dept}
-                                  {isLead && <span className="ml-1 opacity-80 font-normal">({role})</span>}
+                                  <span className="break-words">
+                                    {dept}
+                                    {isLead && <span className="ml-1 opacity-85 font-normal">({roleText})</span>}
+                                  </span>
                                 </span>
                               );
                             })}
@@ -1445,6 +1483,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   departments={selectedMember.departments || []}
                   departmentRoles={selectedMember.departmentRoles || {}}
                   leaderDepartment={selectedMember.leaderDepartment || ''}
+                  currentPosition={selectedMember.currentPosition || ''}
                   consecratedTo={selectedMember.consecratedTo || ''}
                   consecrationDate={selectedMember.consecrationDate || ''}
                   children={selectedMember.children || []}
@@ -1492,10 +1531,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   <DepartmentSelect
                     selectedDepartments={selectedMember.departments || []}
                     departmentRoles={selectedMember.departmentRoles || {}}
-                    onChange={(nextDepts, nextRoles) => {
-                      const leaders = Object.entries(nextRoles)
-                        .filter(([_, role]) => role !== 'Integrante')
-                        .map(([d, r]) => `${r} - ${d}`);
+                    onChange={(nextDepts, nextRoles: Record<string, string[]>) => {
+                      const leaders: string[] = [];
+                      Object.entries(nextRoles).forEach(([dept, roles]) => {
+                        (roles || [])
+                          .filter((r) => r !== 'Integrante' && r !== 'Membro')
+                          .forEach((r) => leaders.push(`${r} - ${dept}`));
+                      });
                       setSelectedMember({
                         ...selectedMember,
                         departments: nextDepts,

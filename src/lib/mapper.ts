@@ -86,43 +86,68 @@ export const toCamel = (data: any) => {
     camelData[uiKey] = data[key];
   });
 
+  let rawRoles: Record<string, any> = {};
   if (typeof camelData.departmentRoles === 'string') {
     try {
-      camelData.departmentRoles = JSON.parse(camelData.departmentRoles);
+      rawRoles = JSON.parse(camelData.departmentRoles);
     } catch {
-      camelData.departmentRoles = {};
+      rawRoles = {};
     }
-  } else if (!camelData.departmentRoles || typeof camelData.departmentRoles !== 'object') {
-    camelData.departmentRoles = {};
+  } else if (camelData.departmentRoles && typeof camelData.departmentRoles === 'object') {
+    rawRoles = camelData.departmentRoles;
   }
+
+  // Normaliza cada entrada para string[] (suporta tanto string legado quanto string[] novo)
+  const normalizedRoles: Record<string, string[]> = {};
+  Object.entries(rawRoles).forEach(([dept, val]) => {
+    if (Array.isArray(val)) {
+      const valid = val.map((r: any) => String(r).trim()).filter(Boolean);
+      normalizedRoles[dept] = valid.length > 0 ? valid : ['Integrante'];
+    } else if (typeof val === 'string' && val.trim()) {
+      normalizedRoles[dept] = [val.trim()];
+    } else {
+      normalizedRoles[dept] = ['Integrante'];
+    }
+  });
 
   // Sincronização bidirecional:
   // 1. Se departmentRoles não tiver liderança mas houver leaderDepartment legado
-  const hasLeadershipInRoles = Object.values(camelData.departmentRoles || {}).some(
-    (r: any) => r && r !== 'Integrante' && r !== 'Membro'
+  const hasLeadershipInRoles = Object.values(normalizedRoles).some((roleList) =>
+    roleList.some((r) => r && r !== 'Integrante' && r !== 'Membro')
   );
 
   if (!hasLeadershipInRoles && camelData.leaderDepartment && typeof camelData.leaderDepartment === 'string' && camelData.leaderDepartment.trim()) {
-    const roles: Record<string, string> = { ...camelData.departmentRoles };
     const segments = camelData.leaderDepartment.split(',').map((s: string) => s.trim()).filter(Boolean);
     segments.forEach((seg: string) => {
       if (seg.includes('—') || seg.includes('-')) {
         const parts = seg.split(/[—\-]/);
         const role = parts[0]?.trim() || 'Líder';
         const dept = parts.slice(1).join(' - ').trim();
-        if (dept) roles[dept] = role;
+        if (dept) {
+          const existing = (normalizedRoles[dept] || []).filter((r) => r !== 'Integrante' && r !== 'Membro');
+          if (!existing.includes(role)) existing.push(role);
+          normalizedRoles[dept] = existing.length > 0 ? existing : ['Integrante'];
+        }
       } else {
-        roles[seg] = 'Líder';
+        const existing = (normalizedRoles[seg] || []).filter((r) => r !== 'Integrante' && r !== 'Membro');
+        if (!existing.includes('Líder')) existing.push('Líder');
+        normalizedRoles[seg] = existing.length > 0 ? existing : ['Integrante'];
       }
     });
-    camelData.departmentRoles = roles;
   }
+
+  camelData.departmentRoles = normalizedRoles;
 
   // 2. Se leaderDepartment estiver vazio mas departmentRoles contiver liderança
   if ((!camelData.leaderDepartment || !camelData.leaderDepartment.trim()) && camelData.departmentRoles) {
-    const leaders = Object.entries(camelData.departmentRoles)
-      .filter(([_, r]) => r && r !== 'Integrante' && r !== 'Membro')
-      .map(([d, r]) => `${r} - ${d}`);
+    const leaders: string[] = [];
+    Object.entries(normalizedRoles).forEach(([dept, roles]) => {
+      roles
+        .filter((r) => r && r !== 'Integrante' && r !== 'Membro')
+        .forEach((r) => {
+          leaders.push(`${r} - ${dept}`);
+        });
+    });
     if (leaders.length > 0) {
       camelData.leaderDepartment = leaders.join(', ');
     }
