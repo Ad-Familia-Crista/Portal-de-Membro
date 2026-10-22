@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, MinisterialEvent, normalizeLegacyDept } from '../types';
+import { Member, DEPARTMENTS, CHILD_DEPARTMENTS, POSITIONS, ALL_DEPT_ROLES, MinisterialEvent, normalizeLegacyDept } from '../types';
 import {
   Search,
   Edit2,
@@ -47,7 +47,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 }) => {
   const { user } = useAuth();
   const { showToast, ToastContainer } = useToast();
+  // ── Busca por texto (com debounce de 300ms) ──────────────────────────────
+  const [searchInput, setSearchInput] = React.useState('');
   const [searchTerm, setSearchTerm] = React.useState('');
+  const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setSearchTerm(value), 300);
+  };
+
+  // ── Filtros avançados ─────────────────────────────────────────────────────
+  const [filterDepts, setFilterDepts] = React.useState<string[]>([]);
+  const [filterLeadership, setFilterLeadership] = React.useState<string[]>([]);
+  const [filterPosition, setFilterPosition] = React.useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = React.useState<string[]>([]);
+  const [showFilters, setShowFilters] = React.useState(false);
+
   const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
   const [selectedMember, setSelectedMember] = React.useState<Member | null>(null);
   const [loadingDetailsId, setLoadingDetailsId] = React.useState<string | null>(null);
@@ -61,15 +77,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     description: '',
     date: new Date().toISOString().split('T')[0],
   });
-  
-  // PAGINAÇÃO (10 registros por página conforme solicitado)
+
+  // PAGINAÇÃO (10 registros por página)
   const [currentPage, setCurrentPage] = React.useState(1);
   const itemsPerPage = 10;
 
-  // Resetar página quando fizer busca
+  // Resetar página ao mudar qualquer filtro
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, filterDepts, filterLeadership, filterPosition, filterStatus]);
 
   const handleAddEvent = () => {
     if (!selectedMember || !eventData.description || !eventData.date) return;
@@ -101,6 +117,26 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const isSecretary = user?.role === 'SECRETARY';
   const isReception = user?.role === 'RECEPTION';
 
+  // ── Helper: normaliza string para comparação sem acentos ─────────────────
+  const normalize = (s: string) =>
+    s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  // Conta filtros avançados ativos (excluindo busca por texto)
+  const activeFilterCount =
+    filterDepts.length +
+    filterLeadership.length +
+    filterPosition.length +
+    filterStatus.length;
+
+  const clearFilters = () => {
+    setSearchInput('');
+    setSearchTerm('');
+    setFilterDepts([]);
+    setFilterLeadership([]);
+    setFilterPosition([]);
+    setFilterStatus([]);
+  };
+
   // Memoiza os filtros para não travar na renderização
   const filteredMembers = React.useMemo(() => {
     return members.filter(m => {
@@ -108,16 +144,56 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       if (m.role === 'ADMIN' || m.role === 'SECRETARY' || m.role === 'RECEPTION') {
         return false;
       }
-      const term = searchTerm.toLowerCase();
-      return (
-        (m.firstName || '').toLowerCase().includes(term) ||
-        (m.lastName || '').toLowerCase().includes(term) ||
-        (m.email || '').toLowerCase().includes(term) ||
-        (m.cpf || '').includes(searchTerm) ||
-        (m.departments || []).some(d => normalizeLegacyDept(d).toLowerCase().includes(term))
-      );
+
+      // 1) Busca por texto (nome, e-mail, CPF, departamento) — ignora acentos
+      if (searchTerm) {
+        const term = normalize(searchTerm);
+        const fullName = normalize(`${m.firstName || ''} ${m.lastName || ''}`);
+        const email = normalize(m.email || '');
+        const cpf = (m.cpf || '').replace(/\D/g, '');
+        const searchDigits = searchTerm.replace(/\D/g, '');
+        const depts = (m.departments || []).map(d => normalize(normalizeLegacyDept(d)));
+        const matchText =
+          fullName.includes(term) ||
+          email.includes(term) ||
+          (searchDigits && cpf.includes(searchDigits)) ||
+          depts.some(d => d.includes(term));
+        if (!matchText) return false;
+      }
+
+      // 2) Departamento (seleção múltipla — qualquer departamento selecionado)
+      if (filterDepts.length > 0) {
+        const memberDepts = (m.departments || []).map(d => normalizeLegacyDept(d));
+        const match = filterDepts.some(fd => memberDepts.includes(fd));
+        if (!match) return false;
+      }
+
+      // 3) Liderança (papel no departamento — seleção múltipla)
+      if (filterLeadership.length > 0) {
+        const roles = Object.values(m.departmentRoles || {});
+        // Para 'Integrante': inclui membros sem roles ou com todos roles = Integrante/Membro
+        const hasIntegranteFilter = filterLeadership.includes('Integrante');
+        const otherRoles = filterLeadership.filter(r => r !== 'Integrante');
+        const isIntegrante = roles.length === 0 || roles.every(r => r === 'Integrante' || r === 'Membro' || !r);
+        const matchLeadership =
+          (hasIntegranteFilter && isIntegrante) ||
+          otherRoles.some(lr => roles.includes(lr));
+        if (!matchLeadership) return false;
+      }
+
+      // 4) Condição atual (currentPosition — seleção múltipla)
+      if (filterPosition.length > 0) {
+        if (!filterPosition.includes(m.currentPosition || '')) return false;
+      }
+
+      // 5) Status (ACTIVE / INACTIVE — seleção múltipla)
+      if (filterStatus.length > 0) {
+        if (!filterStatus.includes(m.status || '')) return false;
+      }
+
+      return true;
     });
-  }, [members, searchTerm]);
+  }, [members, searchTerm, filterDepts, filterLeadership, filterPosition, filterStatus]);
 
   // Aplica paginação sobre os resultados filtrados
   const totalPages = Math.ceil(filteredMembers.length / itemsPerPage) || 1;
@@ -432,22 +508,179 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       </header>
 
       <Card className="p-0 overflow-hidden min-h-[400px] flex flex-col">
-        <div className="p-4 border-b border-muted/10 bg-background/20 flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-            <input
-              type="text"
-              placeholder="Buscar por nome, e-mail, CPF ou departamento..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
-            />
+        {/* ── Barra de Busca + Botão Filtros ── */}
+        <div className="p-4 border-b border-muted/10 bg-background/20 flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* Campo de busca por texto */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+              <input
+                type="text"
+                placeholder="Buscar por nome, e-mail, CPF ou departamento..."
+                value={searchInput}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-lg border border-muted/20 focus:ring-2 focus:ring-primary outline-none text-sm"
+              />
+            </div>
+            <div className="flex gap-2 shrink-0">
+              {/* Botão Filtros com badge de quantidade */}
+              <button
+                onClick={() => setShowFilters(f => !f)}
+                className={`relative flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                  showFilters || activeFilterCount > 0
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-muted/20 text-muted hover:border-primary/40 hover:text-primary'
+                }`}
+              >
+                <Filter className="w-4 h-4" />
+                <span className="hidden sm:inline">Filtros</span>
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-primary text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              {/* Limpar filtros */}
+              {(activeFilterCount > 0 || searchInput) && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-rose-200 text-rose-500 text-sm font-medium hover:bg-rose-50 transition-colors"
+                  title="Limpar todos os filtros"
+                >
+                  <X className="w-4 h-4" />
+                  <span className="hidden sm:inline">Limpar</span>
+                </button>
+              )}
+              <Button variant="ghost" size="sm" className="text-muted" onClick={onRefresh}>
+                Recarregar
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" className="text-muted" onClick={onRefresh}>
-              <Filter className="w-4 h-4 mr-2" /> Recarregar
-            </Button>
-          </div>
+
+          {/* ── Painel de Filtros Avançados (colapsável) ── */}
+          {showFilters && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t border-muted/10 animate-in fade-in slide-in-from-top-2 duration-150">
+
+              {/* Filtro: Departamento (multi-select) */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Departamento
+                </label>
+                <div className="flex flex-col gap-1 max-h-48 overflow-y-auto pr-1 border border-muted/15 rounded-lg p-2 bg-white">
+                  {DEPARTMENTS.filter(d => d !== 'Nenhum Departamento').map(dept => (
+                    <label key={dept} className="flex items-center gap-2 text-xs cursor-pointer hover:text-primary group">
+                      <input
+                        type="checkbox"
+                        checked={filterDepts.includes(dept)}
+                        onChange={(e) => {
+                          setFilterDepts(prev =>
+                            e.target.checked ? [...prev, dept] : prev.filter(d => d !== dept)
+                          );
+                        }}
+                        className="accent-primary w-3 h-3"
+                      />
+                      <span className="leading-tight group-hover:font-medium transition-all">{dept.replace('Dep. ', '')}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filtro: Liderança (multi-select) */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Liderança
+                </label>
+                <div className="flex flex-col gap-1 border border-muted/15 rounded-lg p-2 bg-white">
+                  {ALL_DEPT_ROLES.map(role => (
+                    <label key={role} className="flex items-center gap-2 text-xs cursor-pointer hover:text-primary group">
+                      <input
+                        type="checkbox"
+                        checked={filterLeadership.includes(role)}
+                        onChange={(e) => {
+                          setFilterLeadership(prev =>
+                            e.target.checked ? [...prev, role] : prev.filter(r => r !== role)
+                          );
+                        }}
+                        className="accent-primary w-3 h-3"
+                      />
+                      <span className="leading-tight group-hover:font-medium transition-all">{role}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filtro: Condição Atual (multi-select) */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Condição Atual
+                </label>
+                <div className="flex flex-col gap-1 border border-muted/15 rounded-lg p-2 bg-white">
+                  {POSITIONS.map(pos => (
+                    <label key={pos} className="flex items-center gap-2 text-xs cursor-pointer hover:text-primary group">
+                      <input
+                        type="checkbox"
+                        checked={filterPosition.includes(pos)}
+                        onChange={(e) => {
+                          setFilterPosition(prev =>
+                            e.target.checked ? [...prev, pos] : prev.filter(p => p !== pos)
+                          );
+                        }}
+                        className="accent-primary w-3 h-3"
+                      />
+                      <span className="leading-tight group-hover:font-medium transition-all">{pos}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filtro: Status */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Status
+                </label>
+                <div className="flex flex-col gap-1 border border-muted/15 rounded-lg p-2 bg-white">
+                  {[{ value: 'ACTIVE', label: 'Ativo' }, { value: 'INACTIVE', label: 'Inativo' }].map(opt => (
+                    <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer hover:text-primary group">
+                      <input
+                        type="checkbox"
+                        checked={filterStatus.includes(opt.value)}
+                        onChange={(e) => {
+                          setFilterStatus(prev =>
+                            e.target.checked ? [...prev, opt.value] : prev.filter(s => s !== opt.value)
+                          );
+                        }}
+                        className="accent-primary w-3 h-3"
+                      />
+                      <span className="leading-tight group-hover:font-medium transition-all">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Contador de resultados */}
+                <div className="mt-3 px-2 py-1.5 bg-primary/5 rounded-lg border border-primary/10">
+                  <p className="text-[10px] font-bold text-primary">
+                    Exibindo {filteredMembers.length} de {members.filter(m => m.role === 'MEMBER').length} membros
+                  </p>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* Contador resumido sempre visível quando filtros ativos */}
+          {!showFilters && (activeFilterCount > 0 || searchTerm) && (
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span>
+                Exibindo <strong className="text-primary">{filteredMembers.length}</strong> de{' '}
+                <strong>{members.filter(m => m.role === 'MEMBER').length}</strong> membros
+              </span>
+              {activeFilterCount > 0 && (
+                <span className="text-primary font-medium">
+                  {activeFilterCount} filtro{activeFilterCount > 1 ? 's' : ''} ativo{activeFilterCount > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto flex-1 relative">
@@ -474,8 +707,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             <tbody className="divide-y divide-muted/10">
               {filteredMembers.length === 0 && !loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-10 text-center text-muted italic">
-                    Nenhum membro encontrado.
+                  <td colSpan={6} className="px-6 py-16 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <Search className="w-8 h-8 text-muted/30" />
+                      <p className="text-muted font-medium">
+                        {activeFilterCount > 0 || searchTerm
+                          ? 'Nenhum membro encontrado com esses filtros.'
+                          : 'Nenhum membro cadastrado.'}
+                      </p>
+                      {(activeFilterCount > 0 || searchTerm) && (
+                        <button
+                          onClick={clearFilters}
+                          className="text-xs text-primary font-bold hover:underline mt-1"
+                        >
+                          Limpar filtros
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

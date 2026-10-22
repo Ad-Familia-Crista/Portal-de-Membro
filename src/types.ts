@@ -139,7 +139,8 @@ export const ALL_DEPT_ROLES = [
   'Vice-Líder',
   'Coordenador',
   'Regente',
-  'Professor(a)'
+  'Professor(a)',
+  'Secretário(a)'
 ] as const;
 
 export type DeptRole = typeof ALL_DEPT_ROLES[number];
@@ -149,7 +150,8 @@ export const LEADERSHIP_ROLES = [
   'Vice-Líder',
   'Coordenador',
   'Regente',
-  'Professor(a)'
+  'Professor(a)',
+  'Secretário(a)'
 ] as const;
 
 export type LeadershipRole = typeof LEADERSHIP_ROLES[number];
@@ -164,10 +166,11 @@ export const DEPARTMENTS = [
   'Dep. Evangelismo',
   'Dep. Tesouraria',
   'Dep. Louvor',
-  'Dep. Som/Tecnica',
+  'Dep. Técnico/Som',
   'Dep. Obreiros',
   'Dep. Recepção',
-  'Dep. Escola Biblica Dominical',
+  'Dep. Escola Bíblica Dominical',
+  'Dep. Acolhimento',
   'Dep. Ele Vem',
   'Dep. Cordeirinhos',
   'Nenhum Departamento'
@@ -182,14 +185,21 @@ export const CHILD_DEPARTMENTS = [
 
 /**
  * Normaliza grafias legadas de departamentos para compatibilidade retroativa com dados anteriores.
- * Trata 'Dep. Corderinhos' como equivalente a 'Dep. Cordeirinhos'.
+ * Trata grafias antigas como equivalentes às novas grafias canônicas.
+ *
+ * Legados mapeados:
+ *   'Dep. Corderinhos'          -> 'Dep. Cordeirinhos'
+ *   'Dep. Som/Tecnica'          -> 'Dep. Técnico/Som'
+ *   'Dep. Som/Técnica'          -> 'Dep. Técnico/Som'
+ *   'Dep. Escola Biblica Dominical' -> 'Dep. Escola Bíblica Dominical'
  */
 export const normalizeLegacyDept = (dept?: string | null): string => {
   if (!dept || typeof dept !== 'string') return '';
   const trimmed = dept.trim();
-  if (trimmed.toLowerCase() === 'dep. corderinhos') {
-    return 'Dep. Cordeirinhos';
-  }
+  const lower = trimmed.toLowerCase();
+  if (lower === 'dep. corderinhos') return 'Dep. Cordeirinhos';
+  if (lower === 'dep. som/tecnica' || lower === 'dep. som/técnica') return 'Dep. Técnico/Som';
+  if (lower === 'dep. escola biblica dominical') return 'Dep. Escola Bíblica Dominical';
   return trimmed;
 };
 
